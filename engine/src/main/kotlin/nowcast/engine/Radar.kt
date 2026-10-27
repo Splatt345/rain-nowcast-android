@@ -247,8 +247,10 @@ class RadarSource(private val apiKey: String?, private val cacheDir: File) {
     fun latestFrames(region: Region, n: Int = 12, bbox: List<Double> = region.bbox): List<Frame> =
         listUrls().takeLast(n).map { frame(it, bbox) }
 
-    fun prune(maxAgeMinutes: Int = 180) {
+    /** Drop files and block caches older than [maxAgeMinutes] (by download time). The default
+     *  holds the 12 input frames (55 min apart end to end) plus slack for publication delay. */
+    fun prune(maxAgeMinutes: Int = 70) {
         val cut = System.currentTimeMillis() - maxAgeMinutes * 60_000L
-        cacheDir.listFiles()?.filter { it.lastModified() < cut }?.forEach { it.delete() }
+        cacheDir.listFiles()?.filter { it.lastModified() < cut }?.forEach { it.deleteRecursively() }
     }
 }
