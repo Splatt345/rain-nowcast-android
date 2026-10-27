@@ -37,6 +37,7 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.10.0")
     implementation("org.maplibre.gl:android-sdk:13.7.1")
     implementation("androidx.work:work-runtime-ktx:2.12.0")
+    implementation("androidx.glance:glance:1.2.0")
     implementation("androidx.glance:glance-appwidget:1.2.0")
     implementation("androidx.glance:glance-material3:1.2.0")
 
