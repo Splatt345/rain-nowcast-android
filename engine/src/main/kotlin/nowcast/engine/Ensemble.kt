@@ -286,9 +286,9 @@ internal fun setup(db3: List<DoubleArray>, mo: Motion): StepsSetup? {
         fits.map { it.first }.toTypedArray(), frames.last(), frames.last().sorted().toDoubleArray(), fft)
 }
 
-/** member: n_lead fields in dB, NaN outside the domain. */
+/** member: n_lead fields in mm/h (from_db applied), NaN outside the domain. */
 internal fun member(s: StepsSetup, mo: Motion, m: Int, nLead: Int, seed: Long, kmPerPixel: Double,
-                    timestep: Double, onFirst: ((DoubleArray, DoubleArray) -> Unit)? = null): Array<DoubleArray> {
+                    timestep: Double, onFirst: ((DoubleArray, DoubleArray) -> Unit)? = null): Array<FloatArray> {
     val h = mo.vx.h; val w = mo.vx.w; val n = h * w; val p = s.p
     // casc[i][0] oldest .. casc[i][p-1] newest
     val casc = Array(N_LEVELS) { i -> Array(p) { j -> s.cascades[s.cascades.size - p + j].levels[i].copyOf() } }
@@ -332,7 +332,8 @@ internal fun member(s: StepsSetup, mo: Motion, m: Int, nLead: Int, seed: Long, k
         val vy = Grid(h, w, DoubleArray(n) { mo.vy.v[it] + (gPar * epsPar * parY[it] + gPerp * epsPerp * parX[it]) / vsf })
         slStep(dx, dy, vx, vy)
         if (k == 0) onFirst?.invoke(eps, pm)
-        warp(Grid(h, w, pm), dx, dy)
+        val out = warp(Grid(h, w, pm), dx, dy)
+        FloatArray(n) { fromDbSteps(out[it]) }
     }
 }
 
@@ -347,12 +348,15 @@ fun ensemble(train: List<Grid>, nLead: Int = 12, nMembers: Int = 10, seed: Long 
     val h = db.last().h; val w = db.last().w
     val s = setup(db.map { it.v }, mo)
         ?: return EnsembleResult(Array(nMembers) { Array(nLead) { FloatArray(h * w) } }, mo, h, w)
-    val pool = Executors.newFixedThreadPool(maxOf(1, minOf(threads, nMembers)))
+    // ponytail: ~40 float64 fields live per member in flight; cap the threads so a 192 MB
+    // Android heap does not run out. Measure per-member peak if this needs to be finer.
+    val rt = Runtime.getRuntime()
+    val free = rt.maxMemory() - (rt.totalMemory() - rt.freeMemory()) - 4L * nMembers * nLead * h * w
+    val byHeap = (free / (40L * 8 * h * w)).toInt()
+    val pool = Executors.newFixedThreadPool(maxOf(1, minOf(threads, nMembers, byHeap)))
     try {
         val jobs = (0 until nMembers).map { m ->
-            pool.submit<Array<FloatArray>> {
-                member(s, mo, m, nLead, seed, kmPerPixel, timestep).map { f -> FloatArray(f.size) { fromDbSteps(f[it]) } }.toTypedArray()
-            }
+            pool.submit<Array<FloatArray>> { member(s, mo, m, nLead, seed, kmPerPixel, timestep) }
         }
         return EnsembleResult(jobs.map { it.get() }.toTypedArray(), mo, h, w)
     } finally {

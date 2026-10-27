@@ -66,7 +66,7 @@ class EnsembleTest {
         assertClose(F.arr("f1_m0"), f1, 1e-9, "f1")
         val u = Rng.uniforms(Rng.stream(42, 0, 999), 2)
         assertEquals(F.num("eps_par_m0"), laplace(u[0]), 1e-15); assertEquals(F.num("eps_perp_m0"), laplace(u[1]), 1e-15)
-        val got = dbm.flatMap { m -> m.flatMap { l -> l.map { fromDbSteps(it).toDouble() } } }.toDoubleArray()
+        val got = dbm.flatMap { m -> m.flatMap { l -> l.map { it.toDouble() } } }.toDoubleArray()
         assertClose(F.arr("members"), got, 1e-7, "members")
     }
 
@@ -84,7 +84,7 @@ class EnsembleTest {
         val s1 = setup(d, m1)!!
         assertEquals(F.num("ar1_p").toInt(), s1.p)
         assertClose(F.arr("ar1_phi"), s1.phi.flatMap { it.toList() }.toDoubleArray(), 1e-9, "ar1 phi")
-        val got = (0 until 2).flatMap { m -> member(s1, m1, m, 2, 42, 1.0, 5.0).flatMap { l -> l.map { fromDbSteps(it).toDouble() } } }
+        val got = (0 until 2).flatMap { m -> member(s1, m1, m, 2, 42, 1.0, 5.0).flatMap { l -> l.map { it.toDouble() } } }
         assertClose(F.arr("ar1_members"), got.toDoubleArray(), 1e-6, "ar1 members")
     }
 
