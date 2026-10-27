@@ -5,3 +5,7 @@ __pycache__/
 *.pyc
 *.npz
 optimize_log.jsonl
+.gradle/
+build/
+local.properties
+*.apk
