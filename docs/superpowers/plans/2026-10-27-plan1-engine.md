@@ -1370,6 +1370,7 @@ git commit -m "LAEA projection and the bundled Benelux regions"
   - `object Odim { fun readCrop(file: java.io.File, region: Region): Frame; fun dbzToRain(raw: Double, gain: Double, offset: Double, nodata: Double, undetect: Double): Double; fun parseTime(name: String): java.time.Instant? }`
   - `class RadarException(msg: String) : Exception(msg)`
   - `class RadarSource(val apiKey: String?, val cacheDir: java.io.File) { fun listUrls(lookbackMinutes: Int = 100): List<String>; fun download(url: String): java.io.File; fun latestFrames(region: Region, n: Int = 12): List<Frame>; fun prune(maxAgeMinutes: Int = 180) }`
+  - *Added later (engine efficiency pass):* `RadarSource.frame(url: String, bbox: List<Double>): Frame` reads a crop through HTTP Range requests (16 kB blocks, cached on disk in `<file>.blocks/`, so a frame is fetched once across cycles and boxes; bit-identical to the whole-file crop; falls back to the whole file); `latestFrames(region, n = 12, bbox = region.bbox)`; `var bytesFetched: Long`; `Odim.readCrop(file, bbox)` and `Odim.crop(hdf, bbox, name)`; top-level `pointBbox(lat, lon, boxKm): List<Double>`.
   - `fun extractUrls(json: String): List<String>` (internal helper, tested directly)
 
 - [ ] **Step 1: Test fixtures**
