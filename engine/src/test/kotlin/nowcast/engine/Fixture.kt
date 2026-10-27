@@ -2,10 +2,12 @@ package nowcast.engine
 
 import kotlinx.serialization.json.*
 
-object Fixture {
+object Fixture : FixtureFile("/lite_fixture.json")
+object StepsFixture : FixtureFile("/stepsport_fixture.json")
+
+open class FixtureFile(private val path: String) {
     val js: JsonObject by lazy {
-        Json.parseToJsonElement(
-            Fixture::class.java.getResource("/lite_fixture.json")!!.readText()).jsonObject
+        Json.parseToJsonElement(FixtureFile::class.java.getResource(path)!!.readText()).jsonObject
     }
     val h get() = js["h"]!!.jsonPrimitive.int
     val w get() = js["w"]!!.jsonPrimitive.int
