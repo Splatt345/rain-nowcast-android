@@ -2,7 +2,11 @@ package nowcast.app
 
 import android.content.Context
 import androidx.glance.appwidget.updateAll
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
@@ -32,6 +36,8 @@ data class UiState(
     val problem: Problem? = null,
     val modelNote: String? = null,
     val updated: Instant? = null,
+    /** The region a running cycle is for, so the header is right before the first forecast. */
+    val regionName: String? = null,
 )
 
 /** One cycle for the screens, the worker and the widget. Holds the ensemble in memory so taps only re-trace points. */
@@ -44,6 +50,10 @@ class Repo(private val ctx: Context) {
     private val flow = MutableStateFlow(UiState())
     val state: StateFlow<UiState> = flow
     private val lock = Mutex()
+    /** Cycles outlive the screen that asked for them: a dialog or rotation must not throw away 20 s of work. */
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
+    fun kick(force: Boolean = false) { if (force || !lock.isLocked) scope.launch { refresh(force) } }
 
     private var modelBroken: String? = null           // a failed model is not retried until restart
     private var smaat: Pair<String, SmaatModel>? = null
@@ -69,7 +79,7 @@ class Repo(private val ctx: Context) {
         if (key == null && !demo) { flow.update { it.copy(problem = Problem.NoKey, loading = false) }; return@withLock }
         val (lat, lon) = at ?: s.home
         val region = regionFor(lat, lon)
-        flow.update { it.copy(loading = true) }
+        flow.update { it.copy(loading = true, regionName = region.name) }
         try {
             val frames = withContext(Dispatchers.IO) {
                 if (demo) Demo.frames(ctx, region)
@@ -95,6 +105,8 @@ class Repo(private val ctx: Context) {
             flow.update { it.copy(problem = Problem.Radar(e.message ?: "Radar unavailable")) }
         } catch (e: IOException) {
             flow.update { it.copy(problem = Problem.Network(e.message ?: e::class.simpleName ?: "offline")) }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             flow.update { it.copy(problem = Problem.Radar("${e::class.simpleName}: ${e.message}")) }
         } finally {
@@ -114,6 +126,8 @@ class Repo(private val ctx: Context) {
             val fresh = withContext(Dispatchers.IO) { fetchOutlook(home.first, home.second, outlookModel) }
             outlookAt = home
             flow.update { it.copy(outlook = fresh, outlookError = null) }
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
             flow.update { it.copy(outlookError = e.message ?: "unreachable", outlook = if (moved) null else it.outlook) }
         }
@@ -177,7 +191,7 @@ object Demo {
         if (!f.exists()) ctx.assets.open("opera_sample.h5").use { i -> f.outputStream().use { i.copyTo(it) } }
         val base = Odim.readCrop(f, region)
         val now = Instant.now().epochSecond
-        val t0 = Instant.ofEpochSecond(now - now % 300 - 300)
+        val t0 = Instant.ofEpochSecond(now - now % 300)
         val g = base.rain
         return List(12) { k ->
             val dx = 2 * (11 - k)

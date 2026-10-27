@@ -198,7 +198,7 @@ object OutlookBars {
         if (wet != null) {
             val total = known.filter { it.start >= wet.start && it.start < wet.start.plusSeconds(6 * 3600) }.sumOf { it.mm }
             val whenText = if (wet === known.first()) "now" else "from ${DAY.format(wet.start.atZone(zone))}"
-            return "Rain likely $whenText (${pct(wet.probability)}%), about ${mm(total)} mm in the 6 h after"
+            return "Rain likely $whenText (${pct(wet.probability)}%), about ${mm(total)} mm over the following 6 h"
         }
         val best = known.maxBy { it.probability }
         if (best.probability >= 0.2)

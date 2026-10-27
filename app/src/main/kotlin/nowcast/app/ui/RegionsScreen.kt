@@ -156,14 +156,11 @@ private fun RegionEditor(repo: Repo, start: Region, isNew: Boolean, others: List
                 }
             }
             Dropdown("Radar source", source, Validate.SOURCES, { it.uppercase() }) { source = it }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.weight(1f)) { Dropdown("Model", model, models, { if (it == ModelStore.BUNDLED) "$it (bundled)" else it }) { model = it } }
-                Spacer(Modifier.width(8.dp))
-                FilledTonalButton({ picker.launch(arrayOf("*/*")) }, Modifier.heightIn(min = 52.dp), enabled = !importing) {
-                    if (importing) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
-                    else Icon(Icons.Outlined.UploadFile, null)
-                    Spacer(Modifier.width(6.dp)); Text(if (importing) "Checking…" else "Upload .onnx")
-                }
+            Dropdown("Model", model, models, { if (it == ModelStore.BUNDLED) "$it · bundled" else it }) { model = it }
+            FilledTonalButton({ picker.launch(arrayOf("*/*")) }, Modifier.fillMaxWidth().heightIn(min = 52.dp), enabled = !importing) {
+                if (importing) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp)
+                else Icon(Icons.Outlined.UploadFile, null)
+                Spacer(Modifier.width(8.dp)); Text(if (importing) "Test-running the model…" else "Upload your own .onnx")
             }
             Text("An uploaded model must take 12 frames and return 12, all finite and at most 500 mm/h; it is test-run before it is kept.",
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -185,7 +182,7 @@ private fun BoxMap(bbox: List<Double>, onBox: (List<Double>) -> Unit) {
     var map by remember { mutableStateOf<MapLibreMap?>(null) }
     var style by remember { mutableStateOf<Style?>(null) }
     LaunchedEffect(mapView, dark) {
-        mapView.getMapAsync { m -> map = m; m.uiSettings.isRotateGesturesEnabled = false; m.uiSettings.isLogoEnabled = false
+        mapView.getMapAsync { m -> map = m; m.uiSettings.isRotateGesturesEnabled = false; m.uiSettings.isLogoEnabled = false; m.uiSettings.isAttributionEnabled = false
             m.setStyle(Style.Builder().fromJson(osmStyle(dark))) { style = it } }
     }
     val valid = bbox.size == 4 && bbox.all { it.isFinite() } && bbox[0] < bbox[2] && bbox[1] < bbox[3]
@@ -213,7 +210,7 @@ private fun BoxMap(bbox: List<Double>, onBox: (List<Double>) -> Unit) {
                 val dx = (b.longitudeEast - b.longitudeWest) * 0.08; val dy = (b.latitudeNorth - b.latitudeSouth) * 0.08
                 onBox(listOf(b.longitudeWest + dx, b.latitudeSouth + dy, b.longitudeEast - dx, b.latitudeNorth - dy))
             }
-        }, Modifier.align(Alignment.BottomEnd).padding(8.dp).heightIn(min = 48.dp)) {
+        }, Modifier.align(Alignment.TopEnd).padding(8.dp).heightIn(min = 48.dp)) {
             Icon(Icons.Outlined.CropFree, null); Spacer(Modifier.width(6.dp)); Text("Use visible area")
         }
     }

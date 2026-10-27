@@ -85,7 +85,7 @@ fun NowcastGraph(p: PointForecast, issued: Instant, now: Instant, modifier: Modi
                 },
         ) {
             val left = 36.dp.toPx(); val right = size.width - 8.dp.toPx()
-            val top = 18.dp.toPx(); val stripH = 10.dp.toPx()
+            val top = 28.dp.toPx(); val stripH = 10.dp.toPx()
             val axisH = 18.dp.toPx()
             val plotBottom = size.height - axisH - stripH - 8.dp.toPx()
             fun x(m: Int) = left + (m + SPAN) / (2f * SPAN) * (right - left)

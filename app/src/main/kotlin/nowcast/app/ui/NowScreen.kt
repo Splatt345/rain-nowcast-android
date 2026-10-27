@@ -52,7 +52,7 @@ fun NowScreen(state: UiState, now: Instant, view: NowView, onView: (NowView) -> 
             val fc = state.forecast
             val p = state.point
             val age = fc?.let { Duration.between(it.issued, now).toMinutes().toInt() }
-            Header(fc?.region?.name, age, state.loading)
+            Header(fc?.region?.name ?: state.regionName, age, state.loading)
 
             when {
                 state.problem == Problem.NoKey -> ProblemCard(Icons.Outlined.Key, "Radar key needed",
@@ -125,8 +125,10 @@ private fun Stats(p: nowcast.engine.PointForecast, age: Int) {
     val i = p.minutes.indexOfFirst { it >= age }.coerceAtLeast(0)
     val rate = p.values[i]
     Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-        Tile("Chance", "${(100 * p.rainChance).roundToInt()}", "%", "next hour", Modifier.weight(1.2f), highlight = true)
-        Tile("Now", fmt(rate), "mm/h", if (rate >= RAIN_THRESHOLD) "raining" else "dry", Modifier.weight(1f))
+        // counted from now, like the summary sentence (rainChance starts at the radar frame)
+        val chance = p.probability.copyOfRange(i, p.probability.size).max()
+        Tile("Chance", "${(100 * chance).roundToInt()}", "%", "next hour", Modifier.weight(1.2f), highlight = true)
+        Tile("Now", if (rate > 0.0 && rate < RAIN_THRESHOLD) "<0.1" else fmt(rate), "mm/h", if (rate >= RAIN_THRESHOLD) "raining" else "dry", Modifier.weight(1f))
         Tile("Peak", fmt(p.values.copyOfRange(i, p.values.size).max()), "mm/h", "in the hour", Modifier.weight(1f))
     }
 }
@@ -188,7 +190,9 @@ private fun OutlookCard(state: UiState, now: Instant, zone: ZoneId) {
             OutlookChart(bars, zone, sel, { sel = it }, description = sentence)
             Row(horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.CenterVertically) {
                 ProbScale()
-                Text("bar = expected mm, line = 80% range", style = MaterialTheme.typography.labelSmall,
+                Box(Modifier.size(14.dp, 3.dp).clip(RoundedCornerShape(2.dp)).background(MaterialTheme.colorScheme.tertiary))
+                Text("radar", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text("line = 80% range", style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             val o = state.outlook
@@ -254,7 +258,7 @@ private fun Skeleton() {
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             repeat(3) { Shimmer(Modifier.weight(1f).height(96.dp)) }
         }
-        Text("Fetching the last hour of radar…", style = MaterialTheme.typography.labelMedium,
+        Text("Fetching the last hour of radar and running the ensemble — about half a minute…", style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant)
     }
 }

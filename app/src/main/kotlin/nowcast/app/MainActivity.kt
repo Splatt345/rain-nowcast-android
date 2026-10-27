@@ -71,8 +71,8 @@ private fun Main(repo: Repo) {
 
     // foreground refresh every 5 min while visible; WorkManager covers the rest
     LaunchedEffect(lifecycle) {
-        lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
-            while (true) { repo.refresh(); delay(5 * 60_000L) }
+        lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            while (true) { repo.kick(); delay(5 * 60_000L) }
         }
     }
     var now by remember { mutableStateOf(Instant.now()) }
@@ -91,7 +91,7 @@ private fun Main(repo: Repo) {
         Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surface) {
             when (tab) {
                 Tab.NOW -> NowScreen(state, now, settings.view, { v -> repo.prefs.update { it.copy(view = v) } },
-                    { scope.launch { repo.refresh(force = true) } }, { tab = Tab.SETTINGS },
+                    { repo.kick(force = true) }, { tab = Tab.SETTINGS },
                     Modifier.statusBarsPadding())
                 Tab.MAP -> MapScreen(repo, state, now)
                 Tab.SETTINGS -> SettingsScreen(repo, Modifier.statusBarsPadding())

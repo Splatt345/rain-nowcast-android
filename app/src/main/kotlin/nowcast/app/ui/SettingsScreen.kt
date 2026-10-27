@@ -80,14 +80,14 @@ private fun Main(repo: Repo, openRegions: () -> Unit, modifier: Modifier) {
             Item(Icons.Outlined.Key, "MeteoGate ORD key",
                 if (Repo.SOURCE_OPERA in keys) "Saved · tap to replace or remove" else "Not set — the radar needs it") { editKey = true }
             if (BuildConfig.DEBUG) Toggle(Icons.Outlined.Science, "Sample radar (debug)", "Bundled OPERA file, no key, no network",
-                s.demo) { v -> update { it.copy(demo = v) }; scope.launch { repo.refresh(force = true) } }
+                s.demo) { v -> update { it.copy(demo = v) }; repo.kick(force = true) }
         }
 
         Section("Place")
         Group {
             val (lat, lon) = s.home
             Item(Icons.Outlined.Home, "Home", (if (s.homeLat == null) "Default (Brussels) · " else "") +
-                "%.3f, %.3f".format(java.util.Locale.ROOT, lat, lon) + " · tap a place on the map to change") {}
+                "%.3f, %.3f".format(java.util.Locale.ROOT, lat, lon) + " · tap a place on the map to change", null)
             Item(Icons.Outlined.MyLocation, "Use my location", locating ?: "One-off fix, not tracked") {
                 locPermission.launch(Manifest.permission.ACCESS_COARSE_LOCATION)
             }
@@ -106,7 +106,7 @@ private fun Main(repo: Repo, openRegions: () -> Unit, modifier: Modifier) {
         Section("Forecast")
         Group {
             Toggle(Icons.Outlined.Psychology, "Use the ML model", "SmaAt-UNet shifts the ensemble toward its forecast", s.useModel) { v ->
-                update { it.copy(useModel = v) }; scope.launch { repo.refresh(force = true) }
+                update { it.copy(useModel = v) }; repo.kick(force = true)
             }
             Toggle(Icons.Outlined.Sync, "Background refresh", "Every 15 min, also feeds the widget and alerts", s.background) { v ->
                 update { it.copy(background = v) }; RefreshWorker.schedule(ctx, v)
@@ -128,7 +128,7 @@ private fun Main(repo: Repo, openRegions: () -> Unit, modifier: Modifier) {
     }
 
     if (editKey) KeyDialog(onDismiss = { editKey = false }, onSave = { k ->
-        repo.secrets.set(Repo.SOURCE_OPERA, k); editKey = false; scope.launch { repo.refresh(force = true) }
+        repo.secrets.set(Repo.SOURCE_OPERA, k); editKey = false; repo.kick(force = true)
     }, onRemove = { repo.secrets.set(Repo.SOURCE_OPERA, null); editKey = false })
 }
 
@@ -166,8 +166,8 @@ fun Group(content: @Composable ColumnScope.() -> Unit) =
     }
 
 @Composable
-fun Item(icon: ImageVector, title: String, sub: String, onClick: () -> Unit) {
-    Row(Modifier.fillMaxWidth().clickable(onClick = onClick).heightIn(min = 64.dp).padding(horizontal = 16.dp, vertical = 10.dp),
+fun Item(icon: ImageVector, title: String, sub: String, onClick: (() -> Unit)?) {
+    Row(Modifier.fillMaxWidth().then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier).heightIn(min = 64.dp).padding(horizontal = 16.dp, vertical = 10.dp),
         verticalAlignment = Alignment.CenterVertically) {
         Icon(icon, null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
         Spacer(Modifier.width(16.dp))
@@ -175,7 +175,7 @@ fun Item(icon: ImageVector, title: String, sub: String, onClick: () -> Unit) {
             Text(title, style = MaterialTheme.typography.bodyLarge)
             Text(sub, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
-        Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, null, tint = MaterialTheme.colorScheme.outline)
+        if (onClick != null) Icon(Icons.AutoMirrored.Outlined.KeyboardArrowRight, null, tint = MaterialTheme.colorScheme.outline)
     }
 }
 

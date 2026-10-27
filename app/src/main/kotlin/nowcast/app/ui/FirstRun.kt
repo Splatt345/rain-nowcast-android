@@ -82,8 +82,8 @@ private fun RainArt(modifier: Modifier) {
         val c = Offset(size.width * 0.52f, size.height * 0.36f)
         val r = size.minDimension * 0.17f
         listOf(Offset(-1.3f, 0.25f) to 0.75f, Offset(-0.3f, -0.1f) to 1f, Offset(0.8f, 0.12f) to 0.85f, Offset(1.6f, 0.38f) to 0.6f)
-            .forEach { (o, s) -> drawCircle(cs.primary.copy(alpha = 0.9f), r * s, Offset(c.x + o.x * r, c.y + o.y * r)) }
-        drawRect(cs.primary.copy(alpha = 0.9f), Offset(c.x - 1.3f * r, c.y + 0.2f * r), androidx.compose.ui.geometry.Size(2.9f * r, 0.75f * r))
+            .forEach { (o, s) -> drawCircle(cs.primary, r * s, Offset(c.x + o.x * r, c.y + o.y * r)) }
+        drawRect(cs.primary, Offset(c.x - 1.3f * r, c.y + 0.2f * r), androidx.compose.ui.geometry.Size(2.9f * r, 0.75f * r))
         // rain streaks
         for ((x, y, a) in drops) {
             val px = size.width * x; val py = size.height * (0.55f + y * 0.45f)

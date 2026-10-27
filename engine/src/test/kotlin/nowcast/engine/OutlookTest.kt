@@ -95,7 +95,7 @@ class OutlookTest {
         val dry = List(96) { Bar(t("12:00").plusSeconds(1800L * it), 0.0, 0.0, 0.0, 0.0, BarSource.MODEL) }
         assertEquals("Dry for the next 48 hours", OutlookBars.sentence(dry, ZoneOffset.UTC))
         val wet = dry.mapIndexed { i, x -> if (i == 6) Bar(x.start, 1.0, 0.2, 2.0, 0.7, BarSource.MODEL) else x }
-        assertEquals("Rain likely from Tue 15:00 (70%), about 1.0 mm in the 6 h after",
+        assertEquals("Rain likely from Tue 15:00 (70%), about 1.0 mm over the following 6 h",
             OutlookBars.sentence(wet, ZoneOffset.UTC))
         assertEquals("Outlook unavailable", OutlookBars.sentence(List(96) { null }, ZoneOffset.UTC))
     }

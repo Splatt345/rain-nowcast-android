@@ -52,9 +52,12 @@ class RainWidget : GlanceAppWidget() {
             Text(summary, maxLines = 2, style = TextStyle(color = GlanceTheme.colors.onSurface, fontSize = 15.sp, fontWeight = FontWeight.Medium))
             Spacer(GlanceModifier.height(10.dp))
             Row(GlanceModifier.fillMaxWidth().height(10.dp).semantics { contentDescription = "Rain chance next hour, up to $chance%" }) {
-                probs.forEachIndexed { i, p ->
-                    Box(GlanceModifier.defaultWeight().fillMaxHeight().cornerRadius(3.dp).background(cell(p))) {}
-                    if (i < probs.size - 1) Spacer(GlanceModifier.width(3.dp))
+                // Glance rows hold at most 10 children: six 10-min cells, gaps as padding not spacers
+                val cells = probs.chunked(2).map { it.max() }
+                cells.forEachIndexed { i, p ->
+                    Box(GlanceModifier.defaultWeight().fillMaxHeight().padding(end = if (i < cells.size - 1) 4.dp else 0.dp)) {
+                        Box(GlanceModifier.fillMaxSize().cornerRadius(3.dp).background(cell(p))) {}
+                    }
                 }
             }
             Spacer(GlanceModifier.height(4.dp))

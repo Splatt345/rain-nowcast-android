@@ -4,6 +4,8 @@ import android.graphics.Bitmap
 import androidx.compose.foundation.background
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Home
@@ -125,6 +127,7 @@ fun MapScreen(repo: Repo, state: UiState, now: Instant) {
             map = m
             m.uiSettings.isRotateGesturesEnabled = false; m.uiSettings.isTiltGesturesEnabled = false
             m.uiSettings.isLogoEnabled = false
+            m.uiSettings.isAttributionEnabled = false    // shown as text on the map instead
             m.setStyle(Style.Builder().fromJson(osmStyle(dark))) { st -> style = st }
             m.addOnMapClickListener { ll ->
                 sheet = ll; sheetPoint = null
@@ -169,8 +172,8 @@ fun MapScreen(repo: Repo, state: UiState, now: Instant) {
     Box(Modifier.fillMaxSize()) {
         AndroidView({ mapView }, Modifier.fillMaxSize().semantics { contentDescription = "Rain map. Tap a place for its forecast." })
         Text("© OpenStreetMap contributors", style = MaterialTheme.typography.labelSmall,
-            color = Color(0xFF333333), modifier = Modifier.align(Alignment.TopStart).statusBarsPadding().padding(8.dp)
-                .background(Color(0xCCFFFFFF), RoundedCornerShape(6.dp)).padding(horizontal = 6.dp, vertical = 2.dp))
+            color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.align(Alignment.TopStart).statusBarsPadding().padding(8.dp)
+                .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.8f), RoundedCornerShape(6.dp)).padding(horizontal = 6.dp, vertical = 2.dp))
         PalettePicker(settings.palette, { p -> repo.prefs.update { it.copy(palette = p) } },
             Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(8.dp))
 
@@ -211,8 +214,8 @@ fun MapScreen(repo: Repo, state: UiState, now: Instant) {
     }
 
     sheet?.let { ll ->
-        ModalBottomSheet({ sheet = null }) {
-            Column(Modifier.padding(horizontal = 20.dp).padding(bottom = 24.dp).navigationBarsPadding(),
+        ModalBottomSheet({ sheet = null }, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
+            Column(Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).padding(bottom = 32.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text("%.3f, %.3f".format(java.util.Locale.ROOT, ll.latitude, ll.longitude), style = Overline,
                     color = MaterialTheme.colorScheme.primary)
