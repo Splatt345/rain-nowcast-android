@@ -4,7 +4,7 @@
 
 **Goal:** A pure-Kotlin nowcast engine that turns 12 OPERA radar frames into a 10-member, 12-lead ensemble shifted toward SmaAt-UNet, plus per-point curves and a summary — proven equal to a Python twin that has passed the CIRRUS gate.
 
-**Architecture:** Gradle project with two modules. `engine/` is a plain Kotlin/JVM library (fast JUnit tests on the desktop, no Android); `app/` is the Android app that depends on it and supplies `onnxruntime-android` at runtime (same `ai.onnxruntime` API the engine compiles against). The ensemble ("STEPS-lite": dense Lucas–Kanade motion, perturbed semi-Lagrangian advection, random-walk dB noise) is first written in NumPy in the research repo, scored against shipped STEPS, and only then ported line-for-line to Kotlin with a parity test.
+**Architecture:** Gradle project with two modules. `engine/` is a plain Kotlin/JVM library (fast JUnit tests on the desktop, no Android); `app/` is the Android app that depends on it and supplies `onnxruntime-android` at runtime (same `ai.onnxruntime` API the engine compiles against). The ensemble is first written in NumPy in the research repo, scored against shipped STEPS, and only then ported line-for-line to Kotlin with a parity test. STEPS-lite (Task 2 as first written) failed that gate; the shipped ensemble is a faithful port of pysteps STEPS (`nowcast/stepsport.py`, gate PASS — see the spec's Validation section).
 
 **Tech Stack:** Kotlin 2.4.20, Gradle 9.8.2, AGP 9.3.3 (built-in Kotlin), JDK 21, jHDF 0.12.0, onnxruntime 1.29.0 (desktop jar for tests, `onnxruntime-android` 1.29.0 in the app), kotlinx-serialization-json 1.11.0, JUnit 4.13.2. Python side: the research venv `~/Projects/local_weather_model/.venv`.
 
@@ -22,8 +22,9 @@
 ## File map
 
 ```
-~/Projects/local_weather_model/nowcast/lite.py        Python twin (Task 2)
-~/Projects/local_weather_model/nowcast/litetest.py    gate (Task 2)
+~/Projects/local_weather_model/nowcast/lite.py        motion + RNG twin (Task 2; its ensemble failed gate 0)
+~/Projects/local_weather_model/nowcast/stepsport.py   Python twin of Ensemble.kt (Task 2, redone)
+~/Projects/local_weather_model/nowcast/stepsporttest.py  gate (PREREGISTRATION_STEPSPORT.md)
 
 ~/Projects/rain-nowcast-android/
   settings.gradle.kts, build.gradle.kts, gradle.properties, gradle/wrapper/*
@@ -32,7 +33,8 @@
     Grid.kt        grid type, box blur, bilinear sampling, pyramid      (Task 3)
     Rng.kt         counter-based SplitMix64 + Box–Muller                (Task 3)
     Flow.kt        dense coarse-to-fine Lucas–Kanade                    (Task 3)
-    Ensemble.kt    STEPS-lite                                           (Task 4)
+    Fft.kt         mixed-radix complex FFT, any size                    (Task 4)
+    Ensemble.kt    STEPS port                                           (Task 4)
     Combine.kt     shift toward the model                               (Task 5)
     Point.kt       point curves, spread, probability, summary           (Task 5)
     Laea.kt        ellipsoidal Lambert azimuthal equal-area             (Task 6)
@@ -41,7 +43,7 @@
     Model.kt       SmaAt-UNet via onnxruntime                           (Task 8)
     Nowcaster.kt   one cycle end to end                                 (Task 9)
   engine/src/test/kotlin/nowcast/engine/*Test.kt
-  engine/src/test/resources/{lite_fixture.json, opera_sample.h5}
+  engine/src/test/resources/{lite_fixture.json, stepsport_fixture.json, opera_sample.h5}
   app/build.gradle.kts, app/src/main/AndroidManifest.xml
   app/src/main/kotlin/nowcast/app/MainActivity.kt                       (Task 1)
   app/src/main/assets/{regions.json, smaat.onnx, outlook/*}
@@ -231,6 +233,8 @@ git commit -m "Two-module Gradle project: JVM engine and Android app"
 ---
 
 ### Task 2: Python twin of STEPS-lite, and the gate
+
+> **Outcome 2026-10-27:** STEPS-lite FAILED (CRPS 0.3713 vs 0.3230, wet bias 1.46). Redone as `nowcast/stepsport.py`, a port of pysteps `steps` with lite's motion and RNG, pre-registered in `PREREGISTRATION_STEPSPORT.md` and gated once: PASS (0.3172 vs 0.3230, wet bias 1.099). The lite code below is kept for the record; `lite.motion` and the RNG are still used.
 
 **Repo:** `~/Projects/local_weather_model` (venv `.venv`).
 
@@ -895,6 +899,8 @@ git commit -m "Grid helpers, SplitMix RNG and dense Lucas-Kanade motion, matched
 ---
 
 ### Task 4: STEPS-lite ensemble in Kotlin
+
+> **Superseded 2026-10-27:** implemented instead as `Fft.kt` + `Ensemble.kt`, the STEPS port, twin of `stepsport.py`, tested by `EnsembleTest` against `stepsport_fixture.json`. Public interface kept (`EnsembleResult`, `ensemble(train, nLead, nMembers, seed)`), plus defaulted `kmPerPixel`, `timestep`, `threads`; `residualSigma` no longer exists (STEPS has no such quantity).
 
 **Files:**
 - Create: `engine/src/main/kotlin/nowcast/engine/Ensemble.kt`
@@ -1919,7 +1925,7 @@ class EngineOnDeviceTest {
 
 ```bash
 mkdir -p app/src/androidTest/assets && cp engine/src/test/resources/opera_sample.h5 app/src/androidTest/assets/
-~/Android/emulator/emulator -avd nowcast -no-window -no-audio -no-snapshot &
+~/Android/emulator/emulator -avd nowcast-engine -port 5584 -no-window -no-audio -no-snapshot &
 ~/Android/platform-tools/adb wait-for-device shell 'while [ -z "$(getprop sys.boot_completed)" ]; do sleep 2; done'
 ./gradlew :app:connectedDebugAndroidTest
 ~/Android/platform-tools/adb logcat -d -s EngineOnDevice

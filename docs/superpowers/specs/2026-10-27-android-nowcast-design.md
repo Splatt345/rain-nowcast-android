@@ -11,7 +11,7 @@ implementation and scoring harness.
 rain-nowcast-android/
   app/                      Android app (Kotlin, Compose), minSdk 26
   rain-nowcast/             existing Python add-on = reference + backtest
-    nowcast/lite.py         NumPy twin of Ensemble.kt (new)
+    (twin of Ensemble.kt: local_weather_model/nowcast/stepsport.py)
   regions.json              shared by app and add-on
   docs/superpowers/specs/
 ```
@@ -21,7 +21,7 @@ rain-nowcast-android/
 | File | Mirrors | Job |
 |---|---|---|
 | `Radar.kt` | `live.py` | ORD listing + download (disk cache, pruned >3 h), jHDF read, crop to region bbox, dBZ→mm/h (Marshall-Palmer, as pysteps) |
-| `Ensemble.kt` | pysteps `steps` | **faithful STEPS port** (decision 2026-10-27, after STEPS-lite failed gate 0): pure-Kotlin dense Lucas–Kanade motion; FFT Gaussian-bandpass cascade (pysteps defaults: 8 levels), AR(2) per level fitted on the last frames, nonparametric noise filter, semi-Lagrangian advection, probability matching / masking as pysteps `BASELINE_CONFIG`; 10 members, 12 × 5 min leads. Python twin `local_weather_model/nowcast/stepsport.py` defines the exact algorithm |
+| `Ensemble.kt` | pysteps `steps` | **faithful STEPS port** (decision 2026-10-27, after STEPS-lite failed gate 0): pure-Kotlin dense Lucas–Kanade motion; mixed-radix FFT (`Fft.kt`, native grid size) Gaussian-bandpass cascade (6 levels, `BASELINE_CONFIG`), AR(2) per level from the last 3 frames, nonparametric noise filter, BPS velocity perturbations, incremental mask, CDF probability matching, semi-Lagrangian advection — pysteps defaults otherwise; 10 members, 12 × 5 min leads. Python twin `local_weather_model/nowcast/stepsport.py` defines the exact algorithm |
 | `Model.kt` | `mlmodel.py` | SmaAt-UNet via onnxruntime-android; same transforms, pad-to-16, non-finite / >500 mm/h rejection |
 | `Combine.kt` | `combine.py` | `out_i = clip(steps_i + w·(ml − mean))`, per-lead weights |
 | `Point.kt` | `_point_state`, `interpolate.py`, `_summary` | 1-min point curves along motion, member probability, P10/P90 + min/max, summary text counted from *now* |
@@ -133,12 +133,25 @@ The app sends the features listed in `outlook_gbm.json`, sorts the 9 outputs and
 at 0. **Unverified:** winter (test months are Jul–Oct) and real-member baselines.
 
 ## Validation
-- `lite.py` (NumPy twin of `Ensemble.kt`) scored by `backtest.py` vs STEPS on the same
-  CIRRUS validation windows, both shifted toward SmaAt. Gate: CRPS within the measured
-  CIRRUS noise floor (0.012, not the KNMI-era 0.005) and wet bias ≤ 1.15. Reference
-  Python is the research repo's `rain-nowcast/nowcast/` (the fork's copy is stale).
-- Kotlin/Python parity JVM test on a fixed seeded input, fields within tolerance.
-- Instrumented AVD test: one full cycle on bundled sample ODIM files, no network.
+- `stepsport.py` (NumPy twin of `Ensemble.kt`) ports pysteps 1.21.5 `steps` as the add-on
+  calls it. Its selfcheck runs real pysteps with the twin's motion and random numbers and
+  gets the same members (max |Δ| 1e-13 dB). Deliberate differences, for Kotlin parity
+  only: motion is `lite.motion` (dense LK, last 3 frames) instead of OpenCV LK; SplitMix64
+  streams instead of numpy RandomState; stable sort in probability matching; 10 members,
+  not 12; an all-dry incremental mask stays 0 instead of NaN.
+- Gate (`PREREGISTRATION_STEPSPORT.md`, `stepsporttest.py`, one look): 20 CIRRUS
+  validation wet windows, both shifted toward SmaAt — need `crps(port) <= crps(steps) +
+  0.012` (CIRRUS noise floor) and wet bias ≤ 1.15. **PASS 2026-10-27:** port 0.3172 vs
+  STEPS 0.3230 (port lower by 0.0057), wet bias 1.099 (STEPS 1.106), port lower on 13/20.
+  STEPS-lite had failed the same gate (0.3713, wet bias 1.46). Reference Python is the
+  research repo's `rain-nowcast/nowcast/` (the fork's copy is stale).
+- Kotlin/Python parity JVM test (`EnsembleTest`, `stepsport_fixture.json`, 45×52 grid):
+  FFT, filters, cascade, AR parameters, noise, mask and probability matching at 1e-9;
+  float32 members at 1e-7; AR(1) and dry-input paths; same result for any thread count.
+  JVM: 10 members × 12 leads on 338×364 in 1.9 s on 12 threads (6.9 s on one).
+- Instrumented AVD test (`EngineOnDeviceTest`, API 36 x86_64, 4 cores, 192 MB heap): one
+  full cycle on the bundled ODIM sample, no network — 23.5 s with SmaAt. The ensemble
+  caps its threads by free heap (four members in flight overflowed 192 MB).
 - adb screenshots of each screen on an x86_64 AVD (SDK installed to `~/Android`).
 
 ## Out of scope
