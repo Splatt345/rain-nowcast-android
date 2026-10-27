@@ -21,7 +21,7 @@ rain-nowcast-android/
 | File | Mirrors | Job |
 |---|---|---|
 | `Radar.kt` | `live.py` | ORD listing + download (disk cache, pruned >3 h), jHDF read, crop to region bbox, dBZ→mm/h (Marshall-Palmer, as pysteps) |
-| `Ensemble.kt` | new, replaces STEPS | OpenCV DIS flow on last 3 frames; 10 members = perturbed motion + semi-Lagrangian advection + spatially correlated log-normal growth/decay noise, 12 × 5 min leads |
+| `Ensemble.kt` | new, replaces STEPS | pure-Kotlin dense Lucas–Kanade on the last 3 frames (no OpenCV: JVM-testable, bit-comparable with the Python twin, ~30 MB less APK); 10 members = perturbed motion + semi-Lagrangian advection + spatially smooth dB random walk, 12 × 5 min leads |
 | `Model.kt` | `mlmodel.py` | SmaAt-UNet via onnxruntime-android; same transforms, pad-to-16, non-finite / >500 mm/h rejection |
 | `Combine.kt` | `combine.py` | `out_i = clip(steps_i + w·(ml − mean))`, per-lead weights |
 | `Point.kt` | `_point_state`, `interpolate.py`, `_summary` | 1-min point curves along motion, member probability, P10/P90 + min/max, summary text counted from *now* |
@@ -124,7 +124,9 @@ at 0. **Unverified:** winter (test months are Jul–Oct) and real-member baselin
 
 ## Validation
 - `lite.py` (NumPy twin of `Ensemble.kt`) scored by `backtest.py` vs STEPS on the same
-  archive windows (CSI, CRPS). Gate: |dCRPS| ≤ 0.005, or a documented accepted loss.
+  CIRRUS validation windows, both shifted toward SmaAt. Gate: CRPS within the measured
+  CIRRUS noise floor (0.012, not the KNMI-era 0.005) and wet bias ≤ 1.15. Reference
+  Python is the research repo's `rain-nowcast/nowcast/` (the fork's copy is stale).
 - Kotlin/Python parity JVM test on a fixed seeded input, fields within tolerance.
 - Instrumented AVD test: one full cycle on bundled sample ODIM files, no network.
 - adb screenshots of each screen on an x86_64 AVD (SDK installed to `~/Android`).

@@ -5,3 +5,4 @@
 rain-nowcast/web/vendor/** -text
 custom_components/rain_nowcast/www/leaflet.* -text
 rain-nowcast/models/*.onnx binary
+*.h5 binary
