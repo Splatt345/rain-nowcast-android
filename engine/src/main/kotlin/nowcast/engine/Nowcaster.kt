@@ -2,6 +2,7 @@ package nowcast.engine
 
 import java.time.Duration
 import java.time.Instant
+import kotlin.math.roundToInt
 
 class Forecast(
     val region: Region, val geo: GridGeo, val past: List<Frame>,
@@ -42,6 +43,10 @@ internal fun medianGapMinutes(past: List<Frame>): Int =
     past.zipWithNext { a, b -> Duration.between(a.time, b.time).toMinutes() }
         .filter { it > 0 }.sorted().let { if (it.isEmpty()) 5 else it[it.size / 2].toInt() }
 
+fun Frame.crop(r0: Int, c0: Int, h: Int, w: Int) = Frame(time,
+    Grid(h, w, DoubleArray(h * w) { rain[r0 + it / w, c0 + it % w] }),
+    GridGeo(geo.laea, geo.x1 + c0 * geo.px, geo.y2 - r0 * geo.py, geo.px, geo.py, h, w))
+
 class Nowcaster(private val model: SmaatModel?, private val nMembers: Int = 10, private val seed: Long = 42) {
     fun run(region: Region, frames: List<Frame>): Forecast {
         val train = frames.map { it.rain }
@@ -67,5 +72,20 @@ class Nowcaster(private val model: SmaatModel?, private val nMembers: Int = 10, 
             if (c > 0) (s / c).toFloat() else Float.NaN
         } }
         return Forecast(region, geo, frames, members, mean, ens.motion, frames.last().time, used, err)
+    }
+
+    /**
+     * The whole cycle (motion, ensemble, model, combine) on a boxKm square around the point only:
+     * the cheap path for background "rain in N min" notifications. [frames] may be region frames
+     * or already cropped to [pointBbox]; the box is clamped inside them. Not the full forecast -
+     * a small box sees less context (see the plan's interface notes for its measured error).
+     */
+    fun runPoint(region: Region, frames: List<Frame>, lat: Double, lon: Double, boxKm: Double = 128.0,
+                 now: Instant = Instant.now()): PointForecast {
+        val g = frames.last().geo
+        val (r, c) = g.rowCol(lat, lon)
+        val bh = minOf(g.h, (boxKm * 1000 / g.py).roundToInt()); val bw = minOf(g.w, (boxKm * 1000 / g.px).roundToInt())
+        val r0 = (r - bh / 2).coerceIn(0, g.h - bh); val c0 = (c - bw / 2).coerceIn(0, g.w - bw)
+        return run(region, frames.map { it.crop(r0, c0, bh, bw) }).point(lat, lon, now)
     }
 }

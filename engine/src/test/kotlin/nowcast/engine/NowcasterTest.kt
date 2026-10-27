@@ -40,4 +40,25 @@ class NowcasterTest {
         val ahead = fc.mean.map { it[60 * 140 + 70] }
         assertTrue("mean along the track: $ahead", ahead.drop(3).maxOf { it.toDouble() } > 0.5)
     }
+
+    @Test fun pointRunOnABoxAgreesWithTheFullRun() {
+        // put (50, 4) on the blob's track, 17 px ahead of its last position
+        val (x, y) = geo.laea.forward(50.0, 4.0)
+        val g = GridGeo(geo.laea, x - 70 * 1000.0, y + 60 * 1000.0, 1000.0, 1000.0, 120, 140)
+        val fr = frames().map { Frame(it.time, it.rain, g) }
+        val now = Instant.parse("2026-10-27T12:58:00Z")
+        val nc = Nowcaster(model = null, nMembers = 4)
+        val full = nc.run(be, fr).point(50.0, 4.0, now)
+        val box = nc.runPoint(be, fr, 50.0, 4.0, boxKm = 64.0, now = now)
+        assertTrue(full.minutes.contentEquals(box.minutes))
+        assertTrue(box.inCoverage)
+        val dv = full.values.indices.maxOf { kotlin.math.abs(full.values[it] - box.values[it]) }
+        val dp = full.probability.indices.maxOf { kotlin.math.abs(full.probability[it] - box.probability[it]) }
+        println("POINTBOX synthetic: max |dvalue| %.3f mm/h, max |dprob| %.2f, chance %.2f vs %.2f".format(dv, dp, full.rainChance, box.rainChance))
+        assertTrue(full.rainChance > 0.5 && box.rainChance > 0.5)
+        // a 64 km box tapers the blob at its edge: same arrival, peak within 30%, not the same curve
+        fun arrival(p: PointForecast) = p.minutes.indices.first { p.minutes[it] > 0 && p.values[it] >= 1.0 }
+        assertTrue(kotlin.math.abs(full.minutes[arrival(full)] - box.minutes[arrival(box)]) <= 5)
+        assertEquals(full.values.max(), box.values.max(), 0.3 * full.values.max())
+    }
 }
