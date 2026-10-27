@@ -17,10 +17,11 @@ class RegionsTest {
         check(35.0, -10.0, 120716.40479281009, -4064567.455407303)
     }
 
-    @Test fun pickPrefersTheRegionCentredNearest() {
+    @Test fun pickPrefersTheRegionThePointIsDeepestIn() {
         val rs = Regions.parse(javaClass.getResource("/regions.json")!!.readText())
         assertEquals("be", Regions.pick(rs, 50.85, 4.35)!!.id)          // Brussels
         assertEquals("nl", Regions.pick(rs, 52.37, 4.90)!!.id)          // Amsterdam
+        assertEquals("be", Regions.pick(rs, 50.6, 6.2)!!.id)            // Eifel: Luxembourg's centre is nearer
         assertEquals(null, Regions.pick(rs, 40.0, -3.7))                // Madrid
     }
 }
