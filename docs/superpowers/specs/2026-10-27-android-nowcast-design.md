@@ -21,7 +21,7 @@ rain-nowcast-android/
 | File | Mirrors | Job |
 |---|---|---|
 | `Radar.kt` | `live.py` | ORD listing + download (disk cache, pruned >3 h), jHDF read, crop to region bbox, dBZ→mm/h (Marshall-Palmer, as pysteps) |
-| `Ensemble.kt` | new, replaces STEPS | pure-Kotlin dense Lucas–Kanade on the last 3 frames (no OpenCV: JVM-testable, bit-comparable with the Python twin, ~30 MB less APK); 10 members = perturbed motion + semi-Lagrangian advection + spatially smooth dB random walk, 12 × 5 min leads |
+| `Ensemble.kt` | pysteps `steps` | **faithful STEPS port** (decision 2026-10-27, after STEPS-lite failed gate 0): pure-Kotlin dense Lucas–Kanade motion; FFT Gaussian-bandpass cascade (pysteps defaults: 8 levels), AR(2) per level fitted on the last frames, nonparametric noise filter, semi-Lagrangian advection, probability matching / masking as pysteps `BASELINE_CONFIG`; 10 members, 12 × 5 min leads. Python twin `local_weather_model/nowcast/stepsport.py` defines the exact algorithm |
 | `Model.kt` | `mlmodel.py` | SmaAt-UNet via onnxruntime-android; same transforms, pad-to-16, non-finite / >500 mm/h rejection |
 | `Combine.kt` | `combine.py` | `out_i = clip(steps_i + w·(ml − mean))`, per-lead weights |
 | `Point.kt` | `_point_state`, `interpolate.py`, `_summary` | 1-min point curves along motion, member probability, P10/P90 + min/max, summary text counted from *now* |
@@ -67,7 +67,8 @@ Bottom navigation, three screens, plus a Glance widget.
   strip. Pull to refresh.
 - *Next 48 h*: 96 bars × 30 min; height = expected mm, colour = probability, P10–P90
   whisker, midnight separators; tap → "Tue 14:00–14:30 · 60% · 0.4–1.8 mm"; outlook
-  sentence. First 2 h blended from the nowcast so it never contradicts the other tab.
+  sentence. 0–60 min comes from the nowcast so it never contradicts the other tab; from
+  60 min the outlook (gate 2 result, below).
 
 **Map** — MapLibre Android, OSM raster basemap, forecast overlay as image source;
 timeline slider past→future, play/pause, palette picker; tap → bottom sheet with that
@@ -91,8 +92,13 @@ Source: the local model (below) on Open-Meteo forecast API deterministic ICON-D2
 ICON-EU and IFS; fallback ICON-D2-EPS (20 members, 2 km, 48 h). Hourly data, so each
 30-min bar is half its hour. Probability = share of members > 0.1 mm per 30 min; spread = P10/P90.
 
-Nowcast join: for 0–3 h, point curves blended nowcast→NWP with a lead-dependent weight
-set where the two skills cross (measured, not tuned).
+Nowcast join: **switch, not blend** — nowcast for the first hour, outlook from +1 h.
+Gate 2 (`PREREGISTRATION_OUTLOOK2.md`, 2026-10-27) tested a quantile blend at hours 1–3
+and FAILED (margin 0.0041 < 0.005; hour 3 worse than outlook alone). Hourly CRPS,
+nowcast / outlook / blend: h1 0.146 / 0.179 / 0.128, h2 0.416 / 0.225 / 0.220,
+h3 0.390 / 0.135 / 0.147. Pre-registered fallback: switch where train CRPS crosses
+(between h1 and h2). Nowcast in that test was STEPS-lite; a first-hour-only blend is a
+candidate for a new pre-registration.
 
 ### Local model — tried, gated: **shipped** (result 2026-10-27)
 Trained and scored in the research repo (`local_weather_model/nowcast/outlook*.py`),
@@ -119,6 +125,10 @@ where the radar archive and venv live; exported to `app/src/main/assets/outlook/
 ships as `outlook_gbm.onnx` (8.3 MB, parity with LightGBM 2.7e-6). Used from **+3 h**
 onward — the 0–3 h margin is at the floor and the nowcast covers it. Raw fallback is
 ICON-D2-EPS (beats WeatherNext 2 at both leads); WeatherNext is not added.
+Later challengers, all FAILED against v1 on Single Runs at true leads 3–48 h (test runs
+2026-07-26 → 10-26): v2 with five models (AIFS, HARMONIE added) + neighbourhood features
+0.1983 vs v1 0.1980 (gate 1); a CRPS-trained MLP 0.2068 vs 0.1978 (`PREREGISTRATION_IDEAS3.md`).
+v1 stays.
 The app sends the features listed in `outlook_gbm.json`, sorts the 9 outputs and clips
 at 0. **Unverified:** winter (test months are Jul–Oct) and real-member baselines.
 
