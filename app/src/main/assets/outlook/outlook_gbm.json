@@ -1,0 +1,72 @@
+{
+ "features": [
+  "icon_d2",
+  "icon_eu",
+  "ecmwf_ifs025",
+  "icon_d2_prev_hour",
+  "icon_eu_prev_hour",
+  "ecmwf_ifs025_prev_hour",
+  "icon_d2_next_hour",
+  "icon_eu_next_hour",
+  "ecmwf_ifs025_next_hour",
+  "model_mean",
+  "model_max",
+  "sin_hour",
+  "cos_hour",
+  "sin_doy",
+  "cos_doy",
+  "lat",
+  "lon",
+  "lead_bucket"
+ ],
+ "quantiles": [
+  0.1,
+  0.2,
+  0.3,
+  0.4,
+  0.5,
+  0.6,
+  0.7,
+  0.8,
+  0.9
+ ],
+ "unit": "mm per hour",
+ "lead_bucket": "0 for leads < 12 h, 1 for 12-48 h (trained on ~0-3 h and ~24-27 h only)",
+ "use_from_hours": 3,
+ "gate": {
+  "0": {
+   "rows": 104566,
+   "days": 93,
+   "d2": 0.19899371362181018,
+   "pme": 0.18911348686253784,
+   "d2eps": 0.1719725046332581,
+   "wn2": 0.21992559405781578,
+   "qm": 0.24182564701058853,
+   "gbm": 0.16663605233798054
+  },
+  "1": {
+   "rows": 34153,
+   "days": 31,
+   "d2": 0.29213307664096466,
+   "pme": 0.24221231447702815,
+   "d2eps": 0.23135721400188183,
+   "wn2": 0.24881145695440302,
+   "qm": 0.46848986402872406,
+   "gbm": 0.2180462732660541
+  },
+  "gate_qm": {
+   "pass": false,
+   "0": -0.06985314237733042,
+   "1": -0.23713265002684222
+  },
+  "gate_gbm": {
+   "pass": true,
+   "0": 0.005336452295277572,
+   "1": 0.013310940735827725
+  },
+  "best_raw": {
+   "0": "d2eps",
+   "1": "d2eps"
+  }
+ }
+}

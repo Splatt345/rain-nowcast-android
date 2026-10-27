@@ -12,7 +12,6 @@ rain-nowcast-android/
   app/                      Android app (Kotlin, Compose), minSdk 26
   rain-nowcast/             existing Python add-on = reference + backtest
     nowcast/lite.py         NumPy twin of Ensemble.kt (new)
-    nowcast/outlook_train.py  local long-horizon model trainer (new)
   regions.json              shared by app and add-on
   docs/superpowers/specs/
 ```
@@ -88,25 +87,40 @@ point's graph + summary and "Set as home".
 
 ## 48 h outlook
 
-Source: Open-Meteo ensemble API, ICON-D2-EPS (20 members, 2 km, 48 h), ICON-EU-EPS
-beyond D2's range. Probability = share of members > 0.1 mm per 30 min; spread = P10/P90.
+Source: the local model (below) on Open-Meteo forecast API deterministic ICON-D2,
+ICON-EU and IFS; fallback ICON-D2-EPS (20 members, 2 km, 48 h). Hourly data, so each
+30-min bar is half its hour. Probability = share of members > 0.1 mm per 30 min; spread = P10/P90.
 
 Nowcast join: for 0–3 h, point curves blended nowcast→NWP with a lead-dependent weight
 set where the two skills cross (measured, not tuned).
 
-### Local model — tried, gated, shipped only if it wins
-Candidates, both trained/scored in `rain-nowcast/nowcast/outlook_train.py`:
-1. On-device quantile mapping per lead bucket (ICON vs radar-observed at home).
-2. Gradient-boosted model (features: ICON member stats, lead, hour, season, recent
-   radar at point) trained offline, exported to ONNX, run by the onnxruntime already in the app.
+### Local model — tried, gated: **shipped** (result 2026-10-27)
+Trained and scored in the research repo (`local_weather_model/nowcast/outlook*.py`),
+where the radar archive and venv live; exported to `app/src/main/assets/outlook/`.
 
-Training input: archived ICON-D2-EPS forecasts (Open-Meteo Historical Forecast /
-Previous Runs APIs). Truth: radar archive (retention of ORD archive to be checked first;
-fallback is the research repo's archive).
+- **Truth:** OPERA CIRRUS radar, hourly totals at a 7×7 grid of points (48 km apart)
+  over the Belgium crop. 12 809 radar hours: the seeded archive sample, every Dec–May
+  day 2024/25 + 2025/26, and every day 2026-07-26 → 10-26 (range-request harvest).
+- **Inputs:** Open-Meteo Previous Runs API — ICON-D2, ICON-EU, IFS deterministic, at the
+  freshest run (~0–3 h) and the run ~24 h earlier. Ensemble *members* are not archived
+  (~3 days only); ensemble *mean + spread* are, from 2026-07-26.
+- **Split by time:** train < 2026-07-26, test ≥ 2026-07-26.
+- **Baselines:** ICON-D2-EPS and WeatherNext 2 mean/spread, each as a gamma with that
+  mean and variance (assumed shape — members unavailable).
 
-**Gate:** CRPS on held-out months vs raw Open-Meteo. Ship a candidate only if it beats
-raw by ≥ 0.005 overall **and** is not worse on any lead bucket. Otherwise it is not
-included and the app uses Open-Meteo directly. Result recorded in this spec either way.
+| CRPS (mm/h) | lead ~0–3 h (93 days) | lead ~24 h (31 days) |
+|---|---|---|
+| ICON-D2-EPS | 0.1720 | 0.2314 |
+| WeatherNext 2 | 0.2199 | 0.2488 |
+| quantile mapping | 0.2418 — FAIL | 0.4685 — FAIL |
+| **LightGBM (9 quantiles)** | **0.1666** (+0.0053) | **0.2180** (+0.0133) |
+
+**Decision:** LightGBM passes (≥ 0.005 better than the best raw source at every lead) and
+ships as `outlook_gbm.onnx` (8.3 MB, parity with LightGBM 2.7e-6). Used from **+3 h**
+onward — the 0–3 h margin is at the floor and the nowcast covers it. Raw fallback is
+ICON-D2-EPS (beats WeatherNext 2 at both leads); WeatherNext is not added.
+The app sends the features listed in `outlook_gbm.json`, sorts the 9 outputs and clips
+at 0. **Unverified:** winter (test months are Jul–Oct) and real-member baselines.
 
 ## Validation
 - `lite.py` (NumPy twin of `Ensemble.kt`) scored by `backtest.py` vs STEPS on the same
