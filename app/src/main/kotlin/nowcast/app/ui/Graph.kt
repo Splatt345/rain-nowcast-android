@@ -188,7 +188,7 @@ private fun DrawScope.text(m: TextMeasurer, s: String, style: TextStyle, at: Off
 
 fun fmt(v: Double): String = if (v >= 10) "%.0f".format(Locale.ROOT, v) else "%.1f".format(Locale.ROOT, v)
 
-private fun niceCeil(v: Double): Double {
+internal fun niceCeil(v: Double): Double {
     val steps = doubleArrayOf(1.0, 2.0, 4.0, 5.0, 10.0, 20.0, 40.0, 50.0, 100.0, 200.0)
     return steps.firstOrNull { it >= v } ?: ceil(v)
 }

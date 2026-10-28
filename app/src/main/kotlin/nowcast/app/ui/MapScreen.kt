@@ -21,9 +21,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
-import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
@@ -36,11 +34,9 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import nowcast.app.MapFrames
 import nowcast.app.NowcastSource
 import nowcast.app.Repo
 import nowcast.app.UiState
-import nowcast.engine.Forecast
 import nowcast.engine.PointForecast
 import nowcast.engine.Render
 import org.maplibre.android.camera.CameraUpdateFactory
@@ -59,7 +55,7 @@ import org.maplibre.android.style.sources.ImageSource
 import org.maplibre.geojson.Point
 import java.time.Duration
 import java.time.Instant
-import kotlin.math.roundToInt
+import kotlin.math.abs
 
 /** OpenFreeMap vector basemaps (no key, no limits): Dark at night, Positron by day. */
 fun mapStyle(dark: Boolean): Style.Builder =
@@ -91,42 +87,24 @@ fun rememberMapView(): MapView {
     return view
 }
 
-private fun render(fc: Forecast): MapFrames {
-    val s = Render.mercatorSampler(fc.geo, fc.region.bbox, width = 512)
-    val fields = fc.past.map { f -> FloatArray(f.rain.v.size) { f.rain.v[it].toFloat() } } + fc.mean.toList()
-    val times = fc.past.map { it.time } + (1..fc.mean.size).map { fc.issued.plusSeconds(60L * fc.intervalMinutes * it) }
-    return MapFrames(fields.map { Render.levels(it, fc.geo.h, fc.geo.w, s) }, s.width, s.height, times, fc.region.bbox,
-        fc.region.id, fc.issued, fc.past.size - 1, Render.rasterMotion(fc.motion, s))
-}
-
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MapScreen(repo: Repo, state: UiState, now: Instant) {
     val settings by repo.prefs.settings.collectAsState()
     val dark = mapIsDark()
-    val ctx = LocalContext.current
     val mapView = rememberMapView()
     var map by remember { mutableStateOf<MapLibreMap?>(null) }
     var style by remember { mutableStateOf<Style?>(null) }
     val fc = state.forecast
-    var frames by remember { mutableStateOf<MapFrames?>(null) }
+    val frames by repo.frames.collectAsState()
     var minute by rememberSaveable { mutableIntStateOf(-1) }
     var playing by remember { mutableStateOf(false) }
     var sheet by remember { mutableStateOf<LatLng?>(null) }
     var sheetPoint by remember { mutableStateOf<PointForecast?>(null) }
     val scope = rememberCoroutineScope()
-    val haptic = LocalHapticFeedback.current
 
-    // until this run's forecast is in, the last one drawn (from disk on a cold start), if under 3 h old
-    LaunchedEffect(fc) {
-        val f = if (fc == null) {
-            if (frames != null) return@LaunchedEffect
-            withContext(Dispatchers.IO) { MapFrames.read(ctx.filesDir) }
-                ?.takeIf { Duration.between(it.issued, Instant.now()).toHours() < 3 } ?: return@LaunchedEffect
-        } else withContext(Dispatchers.Default) {
-            render(fc).also { runCatching { MapFrames.write(ctx.filesDir, it) } }
-        }
-        frames = f
+    LaunchedEffect(frames) {
+        val f = frames ?: return@LaunchedEffect
         if (minute !in 0..f.minutes) minute = f.minuteOf(f.newest)          // the newest radar frame
     }
     LaunchedEffect(playing, frames) {
@@ -218,18 +196,21 @@ fun MapScreen(repo: Repo, state: UiState, now: Instant) {
                         }
                         Spacer(Modifier.width(12.dp))
                         Column(Modifier.weight(1f)) {
-                            Text("${HM.format(t.atZone(java.time.ZoneId.systemDefault()))} · ${if (rel == 0) "now" else if (rel > 0) "+$rel min" else "$rel min"}",
-                                style = MaterialTheme.typography.titleSmall)
-                            Text(if (future) "Forecast (ensemble mean)" else "Radar", style = MaterialTheme.typography.labelSmall,
+                            Row(verticalAlignment = Alignment.Bottom) {
+                                Text(HM.format(t.atZone(java.time.ZoneId.systemDefault())), style = MaterialTheme.typography.headlineSmall)
+                                Spacer(Modifier.width(8.dp))
+                                Text(if (abs(rel) < 1) "now" else if (rel > 0) "in $rel min" else "${-rel} min ago",
+                                    Modifier.padding(bottom = 3.dp), style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                            Text(if (future) "Forecast" else "Radar", style = MaterialTheme.typography.labelMedium,
                                 color = if (future) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         RateLegend(lut)
                     }
-                    // by the minute; a tick on each real frame
-                    Slider(minute.toFloat(), { v -> val i = v.roundToInt(); if (i != minute) { minute = i; playing = false
-                            if (f.locate(i).second == 0.0) haptic.performHapticFeedback(HapticFeedbackType.SegmentFrequentTick) } },
-                        valueRange = 0f..f.minutes.toFloat(),
-                        modifier = Modifier.padding(start = 10.dp).semantics { stateDescription = if (rel >= 0) "plus $rel minutes" else "$rel minutes" })
+                    Spacer(Modifier.height(6.dp))
+                    MapTimeline(f, minute, { minute = it; playing = false }, state.point, state.issued, now,
+                        Modifier.padding(start = 4.dp))
                 }
             }
         }

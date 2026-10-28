@@ -111,6 +111,15 @@ class MapFrames(val levels: List<ByteArray>, val w: Int, val h: Int, val times: 
     }
 
     companion object {
+        /** Every radar frame and every forecast step, drawn once for the map. A few seconds for a region. */
+        fun of(fc: Forecast): MapFrames {
+            val s = Render.mercatorSampler(fc.geo, fc.region.bbox, width = 512)
+            val fields = fc.past.map { f -> FloatArray(f.rain.v.size) { f.rain.v[it].toFloat() } } + fc.mean.toList()
+            val times = fc.past.map { it.time } + (1..fc.mean.size).map { fc.issued.plusSeconds(60L * fc.intervalMinutes * it) }
+            return MapFrames(fields.map { Render.levels(it, fc.geo.h, fc.geo.w, s) }, s.width, s.height, times, fc.region.bbox,
+                fc.region.id, fc.issued, fc.past.size - 1, Render.rasterMotion(fc.motion, s))
+        }
+
         private const val FILE = "map.bin"
         private const val VERSION = 2
 

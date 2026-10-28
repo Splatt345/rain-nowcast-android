@@ -56,8 +56,30 @@ class Repo(private val ctx: Context) {
     private val flow = MutableStateFlow(saved?.state() ?: UiState())
     val state: StateFlow<UiState> = flow
     private val lock = Mutex()
+    private val frameFlow = MutableStateFlow<MapFrames?>(null)
+    /** The map's frames, drawn as soon as a forecast is in, so the map opens on them; from disk on a cold start. */
+    val frames: StateFlow<MapFrames?> = frameFlow
+    private var framesFor: Forecast? = null
     /** Cycles outlive the screen that asked for them: a dialog or rotation must not throw away 20 s of work. */
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
+    init {
+        scope.launch(Dispatchers.IO) {
+            val f = MapFrames.read(ctx.filesDir)?.takeIf { Duration.between(it.issued, Instant.now()).toHours() < 3 }
+            frameFlow.compareAndSet(null, f)
+        }
+    }
+
+    /** In the background, off the cycle's lock: the Now screen does not wait for the map. */
+    private fun drawMap(fc: Forecast) {
+        if (fc === framesFor) return
+        framesFor = fc
+        scope.launch {
+            val f = MapFrames.of(fc)
+            if (framesFor === fc) frameFlow.value = f
+            withContext(Dispatchers.IO) { runCatching { MapFrames.write(ctx.filesDir, f) } }
+        }
+    }
 
     fun kick(force: Boolean = false) { if (force || !lock.isLocked) scope.launch { refresh(force) } }
 
@@ -139,6 +161,7 @@ class Repo(private val ctx: Context) {
         } finally {
             flow.update { it.copy(loading = false) }
         }
+        flow.value.forecast?.let(::drawMap)
         refreshOutlook(s)
         val st = flow.value
         if (!openMeteo) publish(st.forecast, st.point, full = true)
