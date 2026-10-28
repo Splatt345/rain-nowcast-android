@@ -1,0 +1,1 @@
+First release: minute-by-minute rain for the next hour from live radar, a 48-hour outlook, a rain map, rain alerts and five widgets.

@@ -40,8 +40,8 @@ android {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            // without the upload key (another machine) a release still builds, debug-signed, which Play refuses
-            signingConfig = signingConfigs.findByName("upload") ?: signingConfigs.getByName("debug")
+            // without the upload key (another machine, F-Droid's build server, which signs itself) it is unsigned
+            signingConfig = signingConfigs.findByName("upload")
         }
     }
     buildFeatures { compose = true; buildConfig = true }
