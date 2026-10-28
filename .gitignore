@@ -5,3 +5,6 @@
 build/
 local.properties
 *.apk
+release-*/
+*.jks
+*.keystore
