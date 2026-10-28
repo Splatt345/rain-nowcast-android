@@ -90,7 +90,8 @@ fun OutlookChart(bars: List<Bar?>, zone: ZoneId, selected: Int?, onSelect: (Int)
                 pathEffect = PathEffect.dashPathEffect(floatArrayOf(6f, 8f)))
         }
         val maxLabel = measurer.measure("${fmt(yMax)} mm", label)
-        drawText(maxLabel, topLeft = Offset(size.width - maxLabel.size.width, y(yMax) - maxLabel.size.height))
+        // under the line at the left edge: day labels own the row above, and no midnight divider is drawn at x = 0
+        drawText(maxLabel, topLeft = Offset(0f, y(yMax) + 2.dp.toPx()))
 
         bars.forEachIndexed { i, b ->
             val cx = i * slot + slot / 2

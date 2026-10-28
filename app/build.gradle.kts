@@ -19,6 +19,15 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
+    buildTypes {
+        release {
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            // ponytail: debug key so a local release build installs; set a real signingConfig before publishing
+            signingConfig = signingConfigs.getByName("debug")
+        }
+    }
     buildFeatures { compose = true; buildConfig = true }
     androidResources { noCompress += listOf("onnx", "h5") }
 }
