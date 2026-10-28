@@ -54,17 +54,23 @@ import kotlin.math.roundToInt
 
 @Composable
 fun SettingsScreen(repo: Repo, modifier: Modifier = Modifier) {
-    var regions by rememberSaveable { mutableStateOf(false) }
-    BackHandler(regions) { regions = false }
-    AnimatedContent(regions, label = "settings", transitionSpec = {
-        val d = if (targetState) 1 else -1
+    var page by rememberSaveable { mutableStateOf("main") }      // main, regions or guide
+    BackHandler(page != "main") { page = "main" }
+    AnimatedContent(page, label = "settings", transitionSpec = {
+        val d = if (targetState != "main") 1 else -1
         (slideInHorizontally(tween(260)) { it / 4 * d } + fadeIn(tween(200))) togetherWith
             (slideOutHorizontally(tween(220)) { -it / 4 * d } + fadeOut(tween(150)))
-    }) { r -> if (r) RegionsScreen(repo, onBack = { regions = false }, modifier) else Main(repo, { regions = true }, modifier) }
+    }) { p ->
+        when (p) {
+            "regions" -> RegionsScreen(repo, onBack = { page = "main" }, modifier)
+            "guide" -> GuideScreen(onBack = { page = "main" }, modifier)
+            else -> Main(repo, { page = "regions" }, { page = "guide" }, modifier)
+        }
+    }
 }
 
 @Composable
-private fun Main(repo: Repo, openRegions: () -> Unit, modifier: Modifier) {
+private fun Main(repo: Repo, openRegions: () -> Unit, openGuide: () -> Unit, modifier: Modifier) {
     val s by repo.prefs.settings.collectAsState()
     val keys by repo.secrets.sources.collectAsState()
     val list by repo.regionStore.regions.collectAsState()
@@ -150,6 +156,8 @@ private fun Main(repo: Repo, openRegions: () -> Unit, modifier: Modifier) {
                 }
             }
             Item(Icons.Outlined.Layers, "Regions and models", "${list.size} regions · add, edit, upload a model", onClick = openRegions)
+            Item(Icons.Outlined.School, "Train a model for your region", "The bundled models know Belgium; how to make your own",
+                onClick = openGuide)
         }
 
         Section("Forecast")
