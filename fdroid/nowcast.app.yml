@@ -5,13 +5,13 @@ Categories:
   - Weather
 License: GPL-3.0-or-later
 AuthorName: REPLACE-your-name
-SourceCode: https://REPLACE-forge/REPLACE-user/rain-nowcast-android
-IssueTracker: https://REPLACE-forge/REPLACE-user/rain-nowcast-android/issues
+SourceCode: https://github.com/Splatt345/rain-nowcast-android
+IssueTracker: https://github.com/Splatt345/rain-nowcast-android/issues
 
 AutoName: Rain Nowcast
 
 RepoType: git
-Repo: https://REPLACE-forge/REPLACE-user/rain-nowcast-android.git
+Repo: https://github.com/Splatt345/rain-nowcast-android.git
 
 Builds:
   - versionName: 1.0.0

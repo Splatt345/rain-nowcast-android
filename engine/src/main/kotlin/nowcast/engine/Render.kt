@@ -2,7 +2,7 @@ package nowcast.engine
 
 import kotlin.math.*
 
-/** Twin of rain-nowcast/nowcast/render.py: level bitmaps on a Mercator raster, coloured by palette. */
+/** Twin of ha-rain-nowcast's rain-nowcast/nowcast/render.py: level bitmaps on a Mercator raster, coloured by palette. */
 object Render {
     const val MIN_RATE = 0.05
     const val MAX_RATE = 80.0

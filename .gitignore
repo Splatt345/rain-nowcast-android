@@ -1,10 +1,6 @@
-.venv/
-data/
 .env
-__pycache__/
-*.pyc
-*.npz
-optimize_log.jsonl
+.claude/settings.local.json
+.kotlin/
 .gradle/
 build/
 local.properties

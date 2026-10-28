@@ -4,7 +4,7 @@ import org.junit.Assert.*
 import org.junit.Test
 import kotlin.math.abs
 
-/** Reference values from rain-nowcast/nowcast/render.py, run 2026-10-27. */
+/** Reference values from ha-rain-nowcast's rain-nowcast/nowcast/render.py, run 2026-10-27. */
 class RenderTest {
     private val geo = GridGeo(Laea.parse("+proj=laea +lat_0=55.0 +lon_0=10.0 +x_0=1950000.0 +y_0=-2100000.0"),
         1365000.0, -2450000.0, 1000.0, 1000.0, 300, 340)

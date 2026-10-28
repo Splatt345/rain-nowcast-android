@@ -11,7 +11,7 @@ class PointForecast(
     val rainChance: Double, val summary: String, val inCoverage: Boolean,
 )
 
-/** Twin of rain-nowcast/nowcast/interpolate.py:point_series. motion is px per frame step. */
+/** Twin of ha-rain-nowcast's rain-nowcast/nowcast/interpolate.py:point_series. motion is px per frame step. */
 fun pointSeries(frames: List<FloatArray>, h: Int, w: Int, motion: Motion?, row: Int, col: Int,
                 subSteps: Int, box: Int = 1): DoubleArray =
     pointSeries(frames.size, h, w, motion, row, col, subSteps, box) { k, i -> frames[k][i].toDouble() }

@@ -1,6 +1,6 @@
 package nowcast.engine
 
-/** Shift the ensemble toward the model, keeping spread. Twin of rain-nowcast/nowcast/combine.py. */
+/** Shift the ensemble toward the model, keeping spread. Twin of ha-rain-nowcast's rain-nowcast/nowcast/combine.py. */
 object Combine {
     val WEIGHTS = doubleArrayOf(0.59, 0.59, 0.62, 0.62, 0.63, 0.65, 0.66, 0.66, 0.67, 0.68, 0.68, 0.69)
 

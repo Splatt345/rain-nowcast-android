@@ -1,7 +1,0 @@
-# Keep the build context to what the image actually copies. data/ is the live
-# radar cache and reaches 7.5 MB of HDF5 during local runs; none of it belongs
-# in a build.
-data/
-__pycache__/
-*.pyc
-*.npz
