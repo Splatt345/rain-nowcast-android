@@ -36,6 +36,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import nowcast.app.NowcastSource
 import nowcast.app.Repo
 import nowcast.app.UiState
 import nowcast.engine.Forecast
@@ -185,7 +186,11 @@ fun MapScreen(repo: Repo, state: UiState, now: Instant) {
             shape = RoundedCornerShape(28.dp), color = MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.96f),
             shadowElevation = 6.dp) {
             Column(Modifier.padding(start = 8.dp, end = 18.dp, top = 8.dp, bottom = 10.dp)) {
-                if (f == null || index !in f.levels.indices) {
+                if (fc == null && (!repo.hasKey || settings.nowcastSource == NowcastSource.OPEN_METEO)) {
+                    Text(if (!repo.hasKey) "The radar map needs a MeteoGate key (Settings). The Now screen and widgets use Open-Meteo without one."
+                        else "Open-Meteo mode loads no radar for home. Tap a place in Europe to load the radar there.",
+                        Modifier.padding(12.dp), style = MaterialTheme.typography.bodyMedium)
+                } else if (f == null || index !in f.levels.indices) {
                     Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
                         CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp); Spacer(Modifier.width(12.dp))
                         Text(if (fc == null) "Waiting for the radar…" else "Drawing the forecast…")

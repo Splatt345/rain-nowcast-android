@@ -121,6 +121,7 @@ private fun Main(repo: Repo, asked: MutableState<Tab?>) {
             when (tab) {
                 Tab.NOW -> NowScreen(state, now, settings.view, { v -> repo.prefs.update { it.copy(view = v) } },
                     { repo.kick(force = true) }, { tab = Tab.SETTINGS },
+                    { repo.prefs.update { it.copy(nowcastSource = NowcastSource.OPEN_METEO) }; repo.kick(force = true) },
                     Modifier.statusBarsPadding())
                 Tab.MAP -> MapScreen(repo, state, now)
                 Tab.SETTINGS -> SettingsScreen(repo, Modifier.statusBarsPadding())

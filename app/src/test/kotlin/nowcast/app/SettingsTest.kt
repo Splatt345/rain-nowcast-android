@@ -7,7 +7,8 @@ class SettingsTest {
     @Test fun roundTrips() {
         val s = Settings(homeLat = 51.2, homeLon = 4.4, followLocation = true, regionId = "nl", view = NowView.OUTLOOK, palette = "viridis",
             notify = false, notifyLeadMin = 15, notifyThreshold = 0.7, background = false, useModel = false,
-            radarColors = List(9) { it * 0x111111 }, appColors = AppColors.CUSTOM, accent = 0xAB12CD, darkMode = DarkMode.DARK)
+            radarColors = List(9) { it * 0x111111 }, appColors = AppColors.CUSTOM, accent = 0xAB12CD, darkMode = DarkMode.DARK,
+            nowcastSource = NowcastSource.OPEN_METEO)
         assertEquals(s, Settings.fromMap(s.toMap()))
         assertEquals(s.copy(palette = "custom"), Settings.fromMap(s.copy(palette = "custom").toMap()))
     }

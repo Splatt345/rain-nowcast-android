@@ -18,7 +18,7 @@ import java.util.concurrent.TimeUnit
 class RefreshWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx, params) {
     override suspend fun doWork(): Result {
         val repo = (applicationContext as App).repo
-        if (!repo.hasKey) return Result.success()
+        if (!repo.canRun) return Result.success()
         // the full ensemble runs only while the app is visible; here, the cheap point path
         val (p, issued) = repo.refreshPoint() ?: return Result.success()
         val s = repo.prefs.value

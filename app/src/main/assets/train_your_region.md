@@ -180,6 +180,12 @@ The Android app reads live radar from OPERA only (`Validate.SOURCES`), so
 outside Europe it needs a new live radar source before any model matters. That
 is app work, not training.
 
+Without radar, the app still works anywhere: **Settings → Next hour from →
+Open-Meteo** uses Open-Meteo's 15-minute forecast models as a small ensemble
+(five or more models answer anywhere on Earth). It needs no key and is free
+for non-commercial use. It is model output, not observed rain, so nothing here
+can be trained on it.
+
 ### Live radar elsewhere
 
 Open sources found on 2026-10-28. Training needs months of past frames, so

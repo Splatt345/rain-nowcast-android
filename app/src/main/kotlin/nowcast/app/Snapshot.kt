@@ -31,6 +31,8 @@ data class Snapshot(
     val prob: List<Float>,
     val bars: List<SBar> = emptyList(),
     val radar: SRadar? = null,
+    /** What the age counts from: "radar", or "Open-Meteo" when the nowcast is model output. */
+    val source: String = "radar",
 ) {
     fun age(now: Instant): Int = Duration.between(Instant.ofEpochSecond(issued), now).toMinutes().toInt().coerceAtLeast(0)
 
@@ -100,6 +102,18 @@ data class Snapshot(
             )
         }
 
+        /** Open-Meteo's point nowcast: no radar crop, so the radar widget says why it is empty. */
+        fun ofPoint(p: PointForecast, issued: Instant, bars: List<Bar?>, full: Boolean, now: Instant = Instant.now()): Snapshot {
+            fun f(a: DoubleArray) = a.map { (it * 100).roundToInt() / 100f }
+            return Snapshot(issued = issued.epochSecond, written = now.epochSecond, region = "Open-Meteo", full = full,
+                minutes = p.minutes.toList(), mean = f(p.values), p10 = f(p.p10), p90 = f(p.p90), prob = f(p.probability),
+                bars = bars.filterNotNull().map { SBar(it.start.epochSecond, it.mm.toFloat(), it.p10.toFloat(), it.p90.toFloat(),
+                    it.probability.toFloat(), it.source == BarSource.NOWCAST) },
+                source = SOURCE_OPEN_METEO)
+        }
+
+        const val SOURCE_OPEN_METEO = "Open-Meteo"
+
         /** Made-up but plausible data for the picker preview and the configuration screen before a first run. */
         fun sample(now: Instant = Instant.now()): Snapshot {
             val issued = now.epochSecond - now.epochSecond % 300 - 300
@@ -147,11 +161,14 @@ object Freshness {
 
     fun stale(age: Int) = age >= STALE_MIN
 
-    fun text(age: Int): String = when {
-        age < 1 -> "radar just now"
-        age < STALE_MIN -> "radar $age min ago"
-        age < 120 -> "Radar $age min old"
-        age < 48 * 60 -> "Radar ${age / 60} h old"
-        else -> "Radar ${age / 1440} days old"
+    fun text(age: Int, source: String = "radar"): String {
+        val big = source.replaceFirstChar { it.uppercase() }
+        return when {
+            age < 1 -> "$source just now"
+            age < STALE_MIN -> "$source $age min ago"
+            age < 120 -> "$big $age min old"
+            age < 48 * 60 -> "$big ${age / 60} h old"
+            else -> "$big ${age / 1440} days old"
+        }
     }
 }

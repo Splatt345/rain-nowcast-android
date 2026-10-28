@@ -6,6 +6,8 @@ import nowcast.engine.Render
 enum class NowView { NOWCAST, OUTLOOK }
 enum class AppColors(val label: String) { WALLPAPER("Wallpaper"), RAIN("Rain"), CUSTOM("Custom") }
 enum class DarkMode(val label: String) { SYSTEM("System"), LIGHT("Light"), DARK("Dark") }
+/** Where the next hour comes from: OPERA radar (MeteoGate key) or Open-Meteo's models (free, no key, worldwide). */
+enum class NowcastSource(val label: String) { RADAR("Radar"), OPEN_METEO("Open-Meteo") }
 
 data class Settings(
     val homeLat: Double? = null, val homeLon: Double? = null,
@@ -24,6 +26,7 @@ data class Settings(
     val notifyThreshold: Double = 0.5,
     val background: Boolean = true,
     val useModel: Boolean = true,
+    val nowcastSource: NowcastSource = NowcastSource.RADAR,
     val demo: Boolean = false,                         // debug builds only: bundled sample radar, no key
 ) {
     fun radarLut(): IntArray = if (palette == Render.CUSTOM) Render.lut(Render.stops(radarColors)) else Render.lut(palette)
@@ -40,6 +43,7 @@ data class Settings(
         put("notify", notify.toString())
         put("notifyLeadMin", notifyLeadMin.toString()); put("notifyThreshold", notifyThreshold.toString())
         put("background", background.toString()); put("useModel", useModel.toString()); put("demo", demo.toString())
+        put("nowcastSource", nowcastSource.name)
     }
 
     companion object {
@@ -76,6 +80,7 @@ data class Settings(
                     .coerceIn(THRESHOLD_RANGE.start, THRESHOLD_RANGE.endInclusive),
                 background = b("background", d.background), useModel = b("useModel", d.useModel),
                 demo = b("demo", d.demo),
+                nowcastSource = NowcastSource.entries.firstOrNull { it.name == s("nowcastSource") } ?: d.nowcastSource,
             )
         }
     }

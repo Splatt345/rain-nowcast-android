@@ -46,7 +46,10 @@ class OutlookMeta(val models: List<String>, val ensemble: String, val trainedBbo
 
     companion object {
         private val NAMES = mapOf("icon_d2" to "ICON-D2", "icon_eu" to "ICON-EU", "ecmwf_ifs025" to "IFS",
-            "meteofrance_arome_france" to "AROME", "gfs_global" to "GFS", "gfs025" to "GFS", "icon_global" to "ICON")
+            "meteofrance_arome_france" to "AROME", "gfs_global" to "GFS", "gfs025" to "GFS", "icon_global" to "ICON",
+            "icon_seamless" to "ICON-EPS")
+        /** Hourly, 40 members, anywhere: used where the model's own ensemble has no data (ICON-D2 is Central Europe only). */
+        const val GLOBAL_ENSEMBLE = "icon_seamless"
         /** The bundled model: 7×7 points 48 km apart around Belgium. */
         val BELGIUM = OutlookMeta(listOf("icon_d2", "icon_eu", "ecmwf_ifs025"), "icon_d2",
             listOf(2.2678, 49.0895, 6.6213, 51.871))
@@ -112,9 +115,9 @@ object OpenMeteo {
     private const val ENS = "https://ensemble-api.open-meteo.com/v1/ensemble"
 
     /** Every hourly key starting with "precipitation", the prefix stripped ("precipitation_icon_d2" -> "icon_d2"). */
-    fun parse(json: String): Hourly {
-        val h = Json.parseToJsonElement(json).jsonObject["hourly"]?.jsonObject
-            ?: throw OutlookException("Open-Meteo answered without hourly data")
+    fun parse(json: String, block: String = "hourly"): Hourly {
+        val h = Json.parseToJsonElement(json).jsonObject[block]?.jsonObject
+            ?: throw OutlookException("Open-Meteo answered without $block data")
         val time = h.getValue("time").jsonArray.map { LocalDateTime.parse(it.jsonPrimitive.content).toInstant(ZoneOffset.UTC) }
         val series = h.filterKeys { it.startsWith("precipitation") }.map { (k, v) ->
             k.removePrefix("precipitation").removePrefix("_").ifEmpty { "precipitation" } to
@@ -123,7 +126,7 @@ object OpenMeteo {
         return Hourly(time, series)
     }
 
-    private fun get(url: String): String {
+    internal fun get(url: String): String {
         val c = URI(url).toURL().openConnection() as HttpURLConnection
         c.connectTimeout = 20_000; c.readTimeout = 30_000
         c.setRequestProperty("User-Agent", "rain-nowcast-android")
@@ -236,7 +239,7 @@ object OutlookBars {
         if (best.probability >= 0.2)
             return "Mostly dry; the best chance of rain is ${DAY.format(best.start.atZone(zone))} (${pct(best.probability)}%)"
         val hours = Duration.between(known.first().start, known.last().end).toHours()
-        return "Dry for the next $hours hours"
+        return if (hours == 1L) "Dry for the next hour" else "Dry for the next $hours hours"
     }
 }
 
@@ -251,10 +254,13 @@ fun fetchOutlook(lat: Double, lon: Double, given: OutlookModel?, now: Instant = 
     val complete = first != null && first.usedModel &&
         first.bars.last().end >= OutlookBars.floor30(now).plusSeconds(1800L * OutlookBars.N)
     if (complete) return first!!
+    var shown = meta
     val ens = runCatching { OpenMeteo.ensemble(lat, lon, meta.ensemble) }.getOrNull()
+        ?: runCatching { OpenMeteo.ensemble(lat, lon, OutlookMeta.GLOBAL_ENSEMBLE) }.getOrNull()
+            ?.also { shown = OutlookMeta(meta.models, OutlookMeta.GLOBAL_ENSEMBLE, meta.trainedBbox) }
     if (det == null && ens == null) throw OutlookException("Open-Meteo unreachable")
-    val o = OutlookBars.assemble(det, ens, model?.let { m -> m::quantiles }, lat, lon, now, meta)
+    val o = OutlookBars.assemble(det, ens, model?.let { m -> m::quantiles }, lat, lon, now, shown)
     return if (outside) Outlook(o.bars, o.fetched, false,
-        "Outside the area the local outlook model was trained on; showing ${meta.ensembleName}", meta)
+        "Outside the area the local outlook model was trained on; showing ${shown.ensembleName}", shown)
     else o
 }

@@ -37,6 +37,10 @@ data class UiState(
     val updated: Instant? = null,
     /** The region a running cycle is for, so the header is right before the first forecast. */
     val regionName: String? = null,
+    /** What [point]'s minutes count from: the radar frame, or the Open-Meteo quarter hour. */
+    val issued: Instant? = null,
+    /** [point] is Open-Meteo model output, not radar. */
+    val modelOnly: Boolean = false,
 )
 
 /** One cycle for the screens, the worker and the widget. Holds the ensemble in memory so taps only re-trace points. */
@@ -70,6 +74,9 @@ class Repo(private val ctx: Context) {
 
     val demo: Boolean get() = BuildConfig.DEBUG && prefs.value.demo
     val hasKey: Boolean get() = demo || secrets.get(SOURCE_OPERA) != null
+    /** Something can run without the user: radar with its key, or Open-Meteo, which needs none. */
+    val canRun: Boolean get() = hasKey || prefs.value.nowcastSource == NowcastSource.OPEN_METEO
+    private val openMeteo get() = prefs.value.nowcastSource == NowcastSource.OPEN_METEO
 
     fun regionFor(lat: Double, lon: Double): Region {
         val regions = regionStore.regions.value
@@ -84,11 +91,13 @@ class Repo(private val ctx: Context) {
     suspend fun refresh(force: Boolean = false, at: Pair<Double, Double>? = null) = lock.withLock {
         if (at == null) follow()
         val s = prefs.value
+        if (openMeteo && at == null) { refreshOpenMeteo(s); return@withLock }
         val key = secrets.get(SOURCE_OPERA)
-        if (key == null && !demo) { flow.update { it.copy(problem = Problem.NoKey, loading = false) }; return@withLock }
+        // Open-Meteo users without a key: the map has no radar, which is not a problem for the Now screen
+        if (key == null && !demo) { if (!openMeteo) flow.update { it.copy(problem = Problem.NoKey, loading = false) }; return@withLock }
         val (lat, lon) = at ?: s.home
         val region = regionFor(lat, lon)
-        flow.update { it.copy(loading = true, regionName = region.name) }
+        flow.update { it.copy(loading = true, regionName = if (openMeteo) it.regionName else region.name) }
         try {
             val frames = withContext(Dispatchers.IO) {
                 if (demo) Demo.frames(ctx, region)
@@ -109,10 +118,14 @@ class Repo(private val ctx: Context) {
                 region.id != "be" && region.model == ModelStore.BUNDLED -> "The bundled model was trained on Belgium only"
                 else -> null
             }
-            val (hl, ho) = s.home
-            val point = if (fc.region.contains(hl, ho)) withContext(Dispatchers.Default) { fc.point(hl, ho) }
-            else flow.value.point
-            flow.update { it.copy(forecast = fc, point = point, problem = null, modelNote = note, updated = Instant.now()) }
+            if (openMeteo) flow.update { it.copy(forecast = fc) }      // a map look-up; home stays on Open-Meteo
+            else {
+                val (hl, ho) = s.home
+                val home = fc.region.contains(hl, ho)
+                val point = if (home) withContext(Dispatchers.Default) { fc.point(hl, ho) } else flow.value.point
+                flow.update { it.copy(forecast = fc, point = point, issued = if (home) fc.issued else it.issued, modelOnly = false,
+                    problem = null, modelNote = note, updated = Instant.now()) }
+            }
         } catch (e: RadarException) {
             flow.update { it.copy(problem = Problem.Radar(e.message ?: "Radar unavailable")) }
         } catch (e: IOException) {
@@ -126,7 +139,36 @@ class Repo(private val ctx: Context) {
         }
         refreshOutlook(s)
         val st = flow.value
-        publish(st.forecast, st.point, full = true)
+        if (!openMeteo) publish(st.forecast, st.point, full = true)
+    }
+
+    /** The Now screen, widgets and alert from Open-Meteo: one small request, no radar, no key needed. */
+    private suspend fun refreshOpenMeteo(s: Settings) {
+        flow.update { it.copy(loading = true, regionName = Snapshot.SOURCE_OPEN_METEO) }
+        try {
+            val (p, issued) = withContext(Dispatchers.IO) { OpenMeteoNowcast.fetch(s.home.first, s.home.second, secrets.get(SOURCE_OPEN_METEO)) }
+            flow.update { it.copy(point = p, issued = issued, modelOnly = true, problem = null, modelNote = null, updated = Instant.now()) }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: IOException) {
+            flow.update { it.copy(problem = Problem.Network(e.message ?: e::class.simpleName ?: "offline")) }
+        } catch (e: Exception) {
+            flow.update { it.copy(problem = Problem.Radar("Open-Meteo: ${e.message}")) }
+        } finally {
+            flow.update { it.copy(loading = false) }
+        }
+        refreshOutlook(s)
+        publishPoint(full = true)
+    }
+
+    private suspend fun publishPoint(full: Boolean) {
+        val st = flow.value
+        val p = st.point; val issued = st.issued
+        if (p != null && issued != null && st.modelOnly) withContext(Dispatchers.IO) {
+            val now = Instant.now()
+            runCatching { Snapshot.ofPoint(p, issued, OutlookBars.join(st.outlook, p, issued, now), full, now).write(ctx.filesDir) }
+        }
+        runCatching { Widgets.updateAll(ctx) }
     }
 
     /**
@@ -137,6 +179,11 @@ class Repo(private val ctx: Context) {
     suspend fun refreshPoint(force: Boolean = false): Pair<PointForecast, Instant>? = lock.withLock {
         follow()
         val s = prefs.value
+        if (openMeteo) {
+            refreshOpenMeteo(s)
+            val st = flow.value
+            return@withLock if (st.problem == null && st.modelOnly) st.point?.let { p -> st.issued?.let { p to it } } else null
+        }
         val key = secrets.get(SOURCE_OPERA)
         if (key == null && !demo) return@withLock null
         val home = s.home; val (lat, lon) = home
@@ -213,8 +260,8 @@ class Repo(private val ctx: Context) {
     suspend fun setHome(lat: Double, lon: Double, manual: Boolean = true) {
         prefs.update { it.copy(homeLat = lat, homeLon = lon, followLocation = it.followLocation && !manual) }
         val fc = flow.value.forecast
-        if (fc != null && fc.region.contains(lat, lon))
-            flow.update { it.copy(point = fc.point(lat, lon)) }
+        if (fc != null && fc.region.contains(lat, lon) && !openMeteo)
+            flow.update { it.copy(point = fc.point(lat, lon), issued = fc.issued) }
         refresh()
     }
 
@@ -230,6 +277,8 @@ class Repo(private val ctx: Context) {
 
     companion object {
         const val SOURCE_OPERA = "opera"
+        /** Optional: a paid Open-Meteo key moves requests to the customer API. */
+        const val SOURCE_OPEN_METEO = "open-meteo"
     }
 }
 

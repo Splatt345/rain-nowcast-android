@@ -218,7 +218,7 @@ private fun Empty(msg: String, cls: SizeClass, t: Float) {
 @Composable
 private fun AgeText(w: W, size: Int = 13, prefix: String? = null) {
     val stale = Freshness.stale(w.age)
-    Text(listOfNotNull(prefix, Freshness.text(w.age)).joinToString(" · "), maxLines = 1,
+    Text(listOfNotNull(prefix?.takeIf { it != w.s.source }, Freshness.text(w.age, w.s.source)).joinToString(" · "), maxLines = 1,
         style = TextStyle(color = if (stale) GlanceTheme.colors.error else GlanceTheme.colors.onSurfaceVariant,
             fontSize = w.sp(size), fontWeight = if (stale) FontWeight.Medium else FontWeight.Normal))
 }
@@ -367,7 +367,10 @@ private fun Hours(w: W, cls: SizeClass) {
 private fun Radar(w: W, cls: SizeClass) {
     val r = w.s.radar
     val f = r?.frame(w.o.lead)
-    if (r == null || f == null) { Empty("No radar yet · open the app", cls, w.t); return }
+    if (r == null || f == null) {
+        Empty(if (w.s.source == Snapshot.SOURCE_OPEN_METEO) "No radar map in Open-Meteo mode" else "No radar yet · open the app", cls, w.t)
+        return
+    }
     val t = HM.format(Instant.ofEpochSecond(w.s.issued + 60L * f.lead).atZone(ZoneId.systemDefault()))
     val what = if (f.lead == 0) "Radar $t" else "Forecast $t (+${f.lead} min)"
     if (cls == SizeClass.LARGE) {

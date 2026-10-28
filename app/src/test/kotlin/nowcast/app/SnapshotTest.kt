@@ -22,6 +22,16 @@ class SnapshotTest {
         assertEquals(30, s.radar!!.frame(40)!!.lead)
     }
 
+    @Test fun openMeteoSnapshotHasNoRadarAndSaysWhereItIsFrom() {
+        val now = Instant.parse("2026-10-28T12:07:00Z")
+        val t = (0..9).map { "\"2026-10-28T%02d:%02d\"".format(11 + it * 15 / 60, it * 15 % 60) }.joinToString(",")
+        val h = nowcast.engine.OpenMeteo.parse("""{"minutely_15":{"time":[$t],"precipitation_icon_d2":[0,0,0,0,0,0,0.5,1,0,0]}}""", "minutely_15")
+        val (p, issued) = nowcast.engine.OpenMeteoNowcast.point(h, now)
+        val s = Snapshot.decode(Snapshot.encode(Snapshot.ofPoint(p, issued, emptyList(), full = true, now = now)))!!
+        assertNull(s.radar); assertEquals(Snapshot.SOURCE_OPEN_METEO, s.source)
+        assertEquals(7, s.age(now)); assertEquals(100, s.chance(now))
+    }
+
     @Test fun missingBrokenOrMismatchedIsNull() {
         assertNull(Snapshot.read(tmp.root))
         File(tmp.root, Snapshot.FILE).writeText("{\"issued\": 1")
@@ -49,6 +59,7 @@ class SnapshotTest {
         assertEquals("radar 7 min ago", Freshness.text(7))
         assertEquals("Radar 47 min old", Freshness.text(47))
         assertEquals("Radar 3 h old", Freshness.text(185))
+        assertEquals("Open-Meteo 7 min ago", Freshness.text(7, Snapshot.SOURCE_OPEN_METEO))
         assertFalse(Freshness.stale(29)); assertTrue(Freshness.stale(30))
     }
 }

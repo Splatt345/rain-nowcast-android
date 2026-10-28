@@ -40,39 +40,46 @@ const val STALE_MIN = 15
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun NowScreen(state: UiState, now: Instant, view: NowView, onView: (NowView) -> Unit, onRefresh: () -> Unit,
-              onOpenSettings: () -> Unit, modifier: Modifier = Modifier) {
+              onOpenSettings: () -> Unit, onUseOpenMeteo: () -> Unit, modifier: Modifier = Modifier) {
     val zone = ZoneId.systemDefault()
-    PullToRefreshBox(isRefreshing = state.loading && state.forecast != null, onRefresh = onRefresh, modifier = modifier.fillMaxSize()) {
+    PullToRefreshBox(isRefreshing = state.loading && state.point != null, onRefresh = onRefresh, modifier = modifier.fillMaxSize()) {
         Column(
             Modifier.fillMaxSize().verticalScroll(rememberScrollState())
                 .widthIn(max = 720.dp).align(Alignment.TopCenter)
                 .padding(horizontal = 20.dp).padding(top = 12.dp, bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            val fc = state.forecast
             val p = state.point
-            val age = fc?.let { Duration.between(it.issued, now).toMinutes().toInt() }
-            Header(fc?.region?.name ?: state.regionName, age, state.loading)
+            val issued = state.issued
+            val age = issued?.let { Duration.between(it, now).toMinutes().toInt() }
+            val src = if (state.modelOnly) "Open-Meteo" else "radar"
+            Header(state.forecast?.region?.name.takeIf { !state.modelOnly } ?: state.regionName, age, state.loading, src)
 
             when {
                 state.problem == Problem.NoKey -> ProblemCard(Icons.Outlined.Key, "Radar key needed",
-                    "Add your MeteoGate ORD API key in Settings to load the radar.", "Open settings", onOpenSettings)
-                fc == null && state.problem != null -> ProblemCard(Icons.Outlined.CloudOff, "No forecast yet",
+                    "Add your MeteoGate ORD API key in Settings to load the radar, or use Open-Meteo's forecast " +
+                        "models instead: free, no key, anywhere in the world, but model output rather than radar.",
+                    "Open settings", onOpenSettings, "Use Open-Meteo", onUseOpenMeteo)
+                p == null && state.problem != null -> ProblemCard(Icons.Outlined.CloudOff, "No forecast yet",
                     problemText(state.problem), "Try again", onRefresh)
-                fc == null || p == null -> Skeleton()
+                p == null || issued == null -> Skeleton()
                 else -> {
                     val stale = (age ?: 0) > STALE_MIN
-                    Text(if (stale) "Radar from ${HM.format(fc.issued.atZone(zone))}: ${p.summary.replaceFirstChar { it.lowercase() }}" else p.summary,
+                    val from = "${src.replaceFirstChar { it.uppercase() }} from ${HM.format(issued.atZone(zone))}"
+                    Text(if (stale) "$from: ${p.summary.replaceFirstChar { it.lowercase() }}" else p.summary,
                         style = MaterialTheme.typography.headlineSmall, modifier = Modifier.semantics { heading() })
                     Stats(p, age ?: 0)
                     if (state.problem != null) Banner(Icons.Outlined.CloudOff,
-                        "${problemText(state.problem)} — showing radar from ${HM.format(fc.issued.atZone(zone))}", warn = true)
-                    else if (stale) Banner(Icons.Outlined.Schedule, "Radar is $age min old; the next refresh will catch up", warn = true)
+                        "${problemText(state.problem)} — showing ${from.replaceFirstChar { it.lowercase() }}", warn = true)
+                    else if (stale) Banner(Icons.Outlined.Schedule,
+                        "${src.replaceFirstChar { it.uppercase() }} is $age min old; the next refresh will catch up", warn = true)
+                    if (state.modelOnly) Banner(Icons.Outlined.Info,
+                        "Open-Meteo forecast models, not radar: rain that is already falling may be missed or misplaced", warn = false)
                     if (!p.inCoverage) Banner(Icons.Outlined.WrongLocation, "Home is outside the radar crop; showing its nearest edge", warn = true)
                 }
             }
 
-            if (fc != null || state.outlook != null) {
+            if (p != null || state.outlook != null) {
                 SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
                     NowView.entries.forEachIndexed { i, v ->
                         SegmentedButton(selected = view == v, onClick = { onView(v) },
@@ -98,7 +105,7 @@ fun NowScreen(state: UiState, now: Instant, view: NowView, onView: (NowView) -> 
 }
 
 @Composable
-private fun Header(region: String?, age: Int?, loading: Boolean) {
+private fun Header(region: String?, age: Int?, loading: Boolean, source: String) {
     Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
             Text("RAIN NOWCAST", style = Overline, color = MaterialTheme.colorScheme.primary)
@@ -113,7 +120,7 @@ private fun Header(region: String?, age: Int?, loading: Boolean) {
                     if (loading) CircularProgressIndicator(Modifier.size(12.dp), strokeWidth = 2.dp, color = fg)
                     else Icon(Icons.Outlined.Radar, null, Modifier.size(14.dp))
                     Spacer(Modifier.width(6.dp))
-                    Text(if (age <= 0) "radar now" else "radar $age min old", style = MaterialTheme.typography.labelMedium)
+                    Text(if (age <= 0) "$source now" else "$source $age min old", style = MaterialTheme.typography.labelMedium)
                 }
             }
         }
@@ -153,11 +160,11 @@ private fun Tile(title: String, value: String, unit: String, sub: String, modifi
 
 @Composable
 private fun NowcastCard(state: UiState, now: Instant) {
-    val p = state.point; val fc = state.forecast
+    val p = state.point; val issued = state.issued
     ElevatedCard(Modifier.fillMaxWidth(), shape = RoundedCornerShape(24.dp),
         colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)) {
         Column(Modifier.padding(start = 8.dp, end = 12.dp, top = 16.dp, bottom = 14.dp)) {
-            if (p != null && fc != null) NowcastGraph(p, fc.issued, now)
+            if (p != null && issued != null) NowcastGraph(p, issued, now)
             else Box(Modifier.fillMaxWidth().height(240.dp)) { Shimmer(Modifier.matchParentSize()) }
         }
     }
@@ -166,7 +173,7 @@ private fun NowcastCard(state: UiState, now: Instant) {
 @Composable
 private fun OutlookCard(state: UiState, now: Instant, zone: ZoneId) {
     val bars = remember(state.outlook, state.point, now.epochSecond / 60) {
-        OutlookBars.join(state.outlook, state.point, state.forecast?.issued, now)
+        OutlookBars.join(state.outlook, state.point, state.issued, now)
     }
     var sel by rememberSaveable(state.outlook) { mutableStateOf<Int?>(null) }
     ElevatedCard(Modifier.fillMaxWidth(), shape = RoundedCornerShape(24.dp),
@@ -191,16 +198,18 @@ private fun OutlookCard(state: UiState, now: Instant, zone: ZoneId) {
             Row(horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.CenterVertically) {
                 ProbScale()
                 Box(Modifier.size(14.dp, 3.dp).clip(RoundedCornerShape(2.dp)).background(MaterialTheme.colorScheme.tertiary))
-                Text("radar", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(if (state.modelOnly) "next hour" else "radar", style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
                 Text("line = 80% range", style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             val o = state.outlook
+            val first = if (state.modelOnly) "First hour from Open-Meteo's 15-minute models" else "First hour from radar"
             val src = when {
                 o == null -> ""
-                o.usedModel -> "First hour from radar, then the local model on " +
+                o.usedModel -> "$first, then the local model on " +
                     o.meta.modelNames.let { n -> if (n.size > 1) n.dropLast(1).joinToString(", ") + " and " + n.last() else n.joinToString() }
-                else -> "First hour from radar, then ${o.meta.ensembleName}"
+                else -> "$first, then ${o.meta.ensembleName}"
             }
             if (src.isNotEmpty()) Text(src + " · fetched ${HM.format(o!!.fetched.atZone(zone))}",
                 style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -233,13 +242,17 @@ fun Banner(icon: ImageVector, text: String, warn: Boolean) {
 }
 
 @Composable
-private fun ProblemCard(icon: ImageVector, title: String, body: String, action: String, onAction: () -> Unit) {
+private fun ProblemCard(icon: ImageVector, title: String, body: String, action: String, onAction: () -> Unit,
+                        other: String? = null, onOther: () -> Unit = {}) {
     OutlinedCard(Modifier.fillMaxWidth(), shape = RoundedCornerShape(24.dp)) {
         Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Icon(icon, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(28.dp))
             Text(title, style = MaterialTheme.typography.titleLarge)
             Text(body, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            FilledTonalButton(onAction, Modifier.padding(top = 4.dp).heightIn(min = 48.dp)) { Text(action) }
+            Row(Modifier.padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilledTonalButton(onAction, Modifier.heightIn(min = 48.dp)) { Text(action) }
+                if (other != null) OutlinedButton(onOther, Modifier.heightIn(min = 48.dp)) { Text(other) }
+            }
         }
     }
 }

@@ -49,6 +49,7 @@ import nowcast.app.Repo
 import nowcast.app.Settings
 import nowcast.app.AppColors
 import nowcast.app.DarkMode
+import nowcast.app.NowcastSource
 import nowcast.engine.Render
 import kotlin.math.roundToInt
 
@@ -76,7 +77,7 @@ private fun Main(repo: Repo, openRegions: () -> Unit, openGuide: () -> Unit, mod
     val list by repo.regionStore.regions.collectAsState()
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
-    var editKey by remember { mutableStateOf(false) }
+    var editKey by remember { mutableStateOf<String?>(null) }      // the source whose key is being edited
     var locating by remember { mutableStateOf<String?>(null) }
 
     fun update(f: (Settings) -> Settings) = repo.prefs.update(f)
@@ -113,8 +114,23 @@ private fun Main(repo: Repo, openRegions: () -> Unit, openGuide: () -> Unit, mod
 
         Section("Radar")
         Group {
+            Segmented("Next hour from", NowcastSource.entries, s.nowcastSource, { it.label }) { v ->
+                update { it.copy(nowcastSource = v) }; repo.kick(force = true) }
+            Text(if (s.nowcastSource == NowcastSource.RADAR)
+                    "Observed radar (EUMETNET OPERA, Europe), moved forward by the nowcast. Needs a free MeteoGate key."
+                else "Open-Meteo's forecast models every 15 min, as a small ensemble: anywhere in the world, no key, " +
+                    "free for non-commercial use. Model output, not observed rain: less sharp in the first hour than radar.",
+                Modifier.padding(start = 56.dp, end = 16.dp, bottom = 8.dp),
+                style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Item(Icons.Outlined.Key, "MeteoGate ORD key",
-                if (Repo.SOURCE_OPERA in keys) "Saved · tap to replace or remove" else "Not set — the radar needs it") { editKey = true }
+                when {
+                    Repo.SOURCE_OPERA in keys -> "Saved · tap to replace or remove"
+                    s.nowcastSource == NowcastSource.RADAR -> "Not set — the radar needs it"
+                    else -> "Not set — only the radar map needs it"
+                }) { editKey = Repo.SOURCE_OPERA }
+            if (s.nowcastSource == NowcastSource.OPEN_METEO) Item(Icons.Outlined.Key, "Open-Meteo API key (optional)",
+                if (Repo.SOURCE_OPEN_METEO in keys) "Saved · requests go to the paid customer API"
+                else "Not needed for personal use; for commercial use or higher limits") { editKey = Repo.SOURCE_OPEN_METEO }
             if (BuildConfig.DEBUG) Toggle(Icons.Outlined.Science, "Sample radar (debug)", "Bundled OPERA file, no key, no network",
                 s.demo) { v -> update { it.copy(demo = v) }; repo.kick(force = true) }
         }
@@ -216,14 +232,17 @@ private fun Main(repo: Repo, openRegions: () -> Unit, openGuide: () -> Unit, mod
             SliderItem("When the chance is at least", "${(s.notifyThreshold * 100).roundToInt()}%", s.notifyThreshold.toFloat(),
                 0.1f..0.9f, 7, s.notify) { v -> update { it.copy(notifyThreshold = (v * 10).roundToInt() / 10.0) } }
         }
-        Text("Radar: EUMETNET OPERA via MeteoGate · Outlook: Open-Meteo (ICON-D2, ICON-EU, IFS) · Map: © OpenStreetMap contributors",
+        Text("Radar: EUMETNET OPERA via MeteoGate · Outlook" + (if (s.nowcastSource == NowcastSource.OPEN_METEO) " and nowcast" else "") +
+            ": Open-Meteo (weather data by Open-Meteo.com, CC BY 4.0) · Map: © OpenStreetMap contributors",
             style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(start = 4.dp, top = 20.dp))
     }
 
-    if (editKey) KeyDialog(onDismiss = { editKey = false }, onSave = { k ->
-        repo.secrets.set(Repo.SOURCE_OPERA, k); editKey = false; repo.kick(force = true)
-    }, onRemove = { repo.secrets.set(Repo.SOURCE_OPERA, null); editKey = false })
+    editKey?.let { src ->
+        KeyDialog(if (src == Repo.SOURCE_OPERA) "ORD API key" else "Open-Meteo API key", onDismiss = { editKey = null }, onSave = { k ->
+            repo.secrets.set(src, k); editKey = null; repo.kick(force = true)
+        }, onRemove = { repo.secrets.set(src, null); editKey = null; repo.kick(force = true) })
+    }
 }
 
 @SuppressLint("MissingPermission")
@@ -237,9 +256,9 @@ private fun oneFix(ctx: Context, done: (Location?) -> Unit) {
 }
 
 @Composable
-private fun KeyDialog(onDismiss: () -> Unit, onSave: (String) -> Unit, onRemove: () -> Unit) {
+private fun KeyDialog(title: String, onDismiss: () -> Unit, onSave: (String) -> Unit, onRemove: () -> Unit) {
     var k by remember { mutableStateOf("") }
-    AlertDialog(onDismiss, title = { Text("ORD API key") },
+    AlertDialog(onDismiss, title = { Text(title) },
         text = {
             OutlinedTextField(k, { k = it.trim() }, singleLine = true, label = { Text("New key") },
                 visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth())
