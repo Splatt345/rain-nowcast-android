@@ -102,8 +102,11 @@ private fun Main(repo: Repo, openRegions: () -> Unit, openGuide: () -> Unit, mod
         else locating = "Location permission denied"
     }
     if (whyBackground) AlertDialog({ whyBackground = false }, title = { Text("Follow you in the background?") },
-        text = { Text("Widgets and rain alerts refresh every 15 minutes while the app is closed. To use where you are " +
-            "then, Android needs location \"Allow all the time\". The app reads one fix per refresh and keeps no history.") },
+        // Play's prominent disclosure: what is collected, that it happens when closed, why, and who gets it
+        text = { Text("Rain Nowcast collects your location to update widgets and rain alerts for where you are, " +
+            "even when the app is closed or not in use. It reads one fix per refresh (every 15 minutes) and keeps no history. " +
+            "To fetch the forecast, an area around you is sent to MeteoGate (radar) and your coordinates to Open-Meteo. " +
+            "Android will ask you to allow location \"All the time\".") },
         confirmButton = { TextButton({ whyBackground = false
             if (Build.VERSION.SDK_INT >= 29) bgPermission.launch(Manifest.permission.ACCESS_BACKGROUND_LOCATION) }) { Text("Continue") } },
         dismissButton = { TextButton({ whyBackground = false }) { Text("Only while open") } })
