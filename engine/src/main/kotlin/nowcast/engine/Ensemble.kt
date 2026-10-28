@@ -11,9 +11,7 @@ import kotlin.math.pow
 import kotlin.math.sqrt
 
 /**
- * pysteps STEPS, ported. Twin of local_weather_model/nowcast/stepsport.py - see its
- * docstring for the configuration and the (parity-only) differences from pysteps.
- * Every function below names the stepsport function it mirrors.
+ * pysteps' STEPS ensemble nowcast, ported. Functions are named after the pysteps steps they port.
  */
 class EnsembleResult(val members: Members, val motion: Motion, val h: Int, val w: Int,
                      val timings: Map<String, Double> = emptyMap())
@@ -37,7 +35,6 @@ private fun std(a: DoubleArray, m: Double = mean(a)): Double {
     var s = 0.0; for (x in a) s += (x - m) * (x - m); return sqrt(s / a.size)
 }
 
-/** tukey */
 internal fun tukey(h: Int, w: Int): DoubleArray = DoubleArray(h * w) { i ->
     val x = (i % w).toDouble() / w - 0.5; val y = (i / w).toDouble() / h - 0.5
     val r = sqrt(x * x + y * y)
@@ -48,7 +45,6 @@ internal fun tukey(h: Int, w: Int): DoubleArray = DoubleArray(h * w) { i ->
     }
 }
 
-/** has_rain */
 internal fun hasRain(db: DoubleArray, taper: DoubleArray): Boolean {
     val mn = db.min()
     return db.indices.any { (if (taper[it] == 0.0) mn else db[it]) > THR_DB }
@@ -103,7 +99,6 @@ internal fun decompose(field: DoubleArray, wts: Array<DoubleArray>, fft: Fft2): 
     return Cascade(levels, mu, sd)
 }
 
-/** corrcoef */
 internal fun corrcoef(a: DoubleArray, b: DoubleArray): Double {
     val ma = mean(a); val mb = mean(b)
     var ab = 0.0; var aa = 0.0; var bb = 0.0
@@ -152,7 +147,6 @@ internal fun noiseFilter(frames: List<DoubleArray>, h: Int, w: Int, fft: Fft2): 
     return DoubleArray(h * w) { val r = ar[it] / f.size; val i = ai[it] / f.size; sqrt(r * r + i * i) }
 }
 
-/** noise */
 internal fun noiseField(filt: DoubleArray, white: DoubleArray, fft: Fft2): DoubleArray {
     val re = white.copyOf(); val im = DoubleArray(white.size)
     fft.forward(re, im)
@@ -184,7 +178,6 @@ private fun slStep(dx: DoubleArray, dy: DoubleArray, vx: Grid, vy: Grid, par: Pa
     }
 }
 
-/** warp */
 private fun warp(field: Grid, dx: DoubleArray, dy: DoubleArray, outval: Double = Double.NaN,
                  out: DoubleArray = DoubleArray(dx.size), par: Par = Par.SERIAL): DoubleArray {
     par.run(dx.size) { from, until ->
@@ -380,7 +373,7 @@ internal fun member(s: StepsSetup, mo: Motion, m: Int, nLead: Int, seed: Long, k
     val dx = DoubleArray(n); val dy = DoubleArray(n)
     // The cascade lives in Fourier space (half spectrum, h x hw): the noise is W * filt * band,
     // each level normalised by its Parseval std, and only the recomposed field is transformed
-    // back. Same algebra as stepsport; and since the AR recursion does not see the field,
+    // back. Same algebra as pysteps; and since the AR recursion does not see the field,
     // two leads share one forward FFT (their white noise as real + i*imag) and one inverse.
     val hw = w / 2 + 1; val nh = h * hw
     // lre[i][0] oldest .. lre[i][p-1] newest
@@ -489,9 +482,9 @@ fun ensemble(train: List<Grid>, nLead: Int = 12, nMembers: Int = 10, seed: Long 
         val s = setup(db.map { it.v }, mo, Par(rows, threads))
             ?: return EnsembleResult(Members.alloc(nMembers, nLead, h * w, dir), mo, h, w, mapOf("flow" to tFlow))
         val tSetup = since(t1); val t2 = System.nanoTime()
-        // ponytail: ~40 float64 fields per member (cascade spectra, buffers, transients) plus its 12
+        // ~40 float64 fields per member (cascade spectra, buffers, transients) plus its 12
         // float32 leads until they go off-heap; cap the threads so a 192 MB Android heap does not run
-        // out. Measured, not derived: 40 was fine on the AVD; a finer cap would need a per-member peak.
+        // out. Measured, not derived: 40 was fine on a 192 MB emulator; a finer cap would need a per-member peak.
         val rt = Runtime.getRuntime()
         val free = rt.maxMemory() - (rt.totalMemory() - rt.freeMemory())
         val byHeap = (free / ((40L + nLead / 2) * 8 * h * w)).toInt()

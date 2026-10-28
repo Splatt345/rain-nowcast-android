@@ -86,8 +86,8 @@ val Overline: TextStyle
 
 /**
  * Light and dark schemes around one accent: HSL tones of its hue, a hue-shifted secondary and tertiary,
- * surfaces faintly tinted. ponytail: HSL, not Material's HCT tones; add material-color-utilities if
- * contrast on odd accents (pure yellow) ever matters.
+ * surfaces faintly tinted. HSL, not Material's HCT tones, so contrast on odd accents (pure yellow)
+ * is not tuned.
  */
 fun seedScheme(seed: Int, dark: Boolean): ColorScheme {
     val hsl = FloatArray(3).also { ColorUtils.colorToHSL(seed or 0xFF000000.toInt(), it) }

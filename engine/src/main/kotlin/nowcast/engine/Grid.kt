@@ -20,7 +20,7 @@ class Par(val pool: java.util.concurrent.ExecutorService?, val ways: Int) {
     companion object { val SERIAL = Par(null, 1) }
 }
 
-/** Row-major 2-D field. Twin of the helpers at the top of nowcast/lite.py. */
+/** Row-major 2-D field. */
 class Grid(val h: Int, val w: Int, val v: DoubleArray = DoubleArray(h * w)) {
     operator fun get(r: Int, c: Int) = v[r * w + c]
     operator fun set(r: Int, c: Int, x: Double) { v[r * w + c] = x }

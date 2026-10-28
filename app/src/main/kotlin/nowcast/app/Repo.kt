@@ -1,5 +1,6 @@
 package nowcast.app
 
+import nowcast.app.widget.*
 import android.content.Context
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -48,7 +49,6 @@ data class UiState(
 
 /** One cycle for the screens, the worker and the widget. Holds the ensemble in memory so taps only re-trace points. */
 class Repo(private val ctx: Context) {
-    init { ctx.deleteSharedPreferences("widget") }    // the old one-line snapshot; widget.json replaced it
     val prefs = Prefs(ctx)
     val secrets = Secrets(ctx)
     val regionStore = RegionStore(ctx)
@@ -99,8 +99,7 @@ class Repo(private val ctx: Context) {
     }
     private var outlookAt: Pair<Double, Double>? = saved?.outlook?.let { prefs.value.home }
 
-    val demo: Boolean get() = BuildConfig.DEBUG && prefs.value.demo
-    val hasKey: Boolean get() = demo || secrets.get(SOURCE_OPERA) != null
+    val hasKey: Boolean get() = secrets.get(SOURCE_OPERA) != null
     /** Something can run without the user: radar with its key, or Open-Meteo, which needs none. */
     val canRun: Boolean get() = hasKey || prefs.value.nowcastSource == NowcastSource.OPEN_METEO
     private val openMeteo get() = prefs.value.nowcastSource == NowcastSource.OPEN_METEO
@@ -123,14 +122,13 @@ class Repo(private val ctx: Context) {
         if (openMeteo && at == null) { refreshOpenMeteo(s); return@withLock }
         val key = secrets.get(SOURCE_OPERA)
         // Open-Meteo users without a key: the map has no radar, which is not a problem for the Now screen
-        if (key == null && !demo) { if (!openMeteo) flow.update { it.copy(problem = Problem.NoKey, loading = false) }; return@withLock }
+        if (key == null) { if (!openMeteo) flow.update { it.copy(problem = Problem.NoKey, loading = false) }; return@withLock }
         val (lat, lon) = at ?: s.home
         val region = regionFor(lat, lon, chosen = at == null)
         flow.update { it.copy(loading = true, regionName = if (openMeteo) it.regionName else region.name) }
         try {
             val frames = withContext(Dispatchers.IO) {
-                if (demo) Demo.frames(ctx, region)
-                else RadarSource(key, File(ctx.cacheDir, "radar")).run { prune(); latestFrames(region) }
+                RadarSource(key, File(ctx.cacheDir, "radar")).run { prune(); latestFrames(region) }
             }
             var old = flow.value.forecast
             val reuse = old != null && Cycle.skip(frames.last().time, old.issued, old.region == region, force)
@@ -224,15 +222,14 @@ class Repo(private val ctx: Context) {
             return@withLock if (st.problem == null && st.modelOnly) st.point?.let { p -> st.issued?.let { p to it } } else null
         }
         val key = secrets.get(SOURCE_OPERA)
-        if (key == null && !demo) return@withLock null
+        if (key == null) return@withLock null
         val home = s.home; val (lat, lon) = home
         val region = regionFor(lat, lon)
         var result: Pair<PointForecast, Instant>? = null
         var fc: Forecast? = null
         try {
             val frames = withContext(Dispatchers.IO) {
-                if (demo) Demo.frames(ctx, region)
-                else RadarSource(key, File(ctx.cacheDir, "radar")).run { prune(); latestFrames(region, 12, bbox = pointBbox(lat, lon, Cycle.BOX_KM)) }
+                RadarSource(key, File(ctx.cacheDir, "radar")).run { prune(); latestFrames(region, 12, bbox = pointBbox(lat, lon, Cycle.BOX_KM)) }
             }
             val last = withContext(Dispatchers.IO) { Snapshot.read(ctx.filesDir) }
             val lastHome = last?.radar?.let { it.homeLat to it.homeLon }
@@ -344,39 +341,5 @@ class Repo(private val ctx: Context) {
         const val SOURCE_OPERA = "opera"
         /** Optional: a paid Open-Meteo key moves requests to the customer API. */
         const val SOURCE_OPEN_METEO = "open-meteo"
-    }
-}
-
-/** Debug builds: the bundled OPERA sample, moved 2 px east per frame, stamped as if it were live. */
-object Demo {
-    fun frames(ctx: Context, region: Region): List<Frame> {
-        val f = File(ctx.cacheDir, "demo.h5")
-        if (!f.exists()) ctx.assets.open("opera_sample.h5").use { i -> f.outputStream().use { i.copyTo(it) } }
-        val base = Odim.readCrop(f, region)
-        val now = Instant.now().epochSecond
-        val t0 = Instant.ofEpochSecond(now - now % 300)
-        File(ctx.filesDir, "demo_frames.bin").takeIf { it.exists() }?.let { return replay(it, base.geo, t0) }
-        val g = base.rain
-        return List(12) { k ->
-            val dx = 2 * (11 - k)
-            Frame(t0.minusSeconds(300L * (11 - k)),
-                Grid(g.h, g.w, DoubleArray(g.h * g.w) { i -> val c = i % g.w + dx; if (c < g.w) g.v[i - i % g.w + c] else 0.0 }),
-                base.geo)
-        }
-    }
-
-    /** An archived hour pushed by play/screenshots/rain.sh (n, h, w; x1, y2, px, py; projdef;
-     *  n*h*w float32 mm/h on the same 1 km OPERA grid), cut to the region's crop and restamped to now. */
-    private fun replay(f: File, geo: GridGeo, t0: Instant): List<Frame> = java.io.DataInputStream(f.inputStream().buffered()).use { s ->
-        val n = s.readInt(); val h = s.readInt(); val w = s.readInt()
-        val x1 = s.readDouble(); val y2 = s.readDouble(); s.readDouble(); s.readDouble(); s.readUTF()
-        val dr = Math.round((y2 - geo.y2) / geo.py).toInt(); val dc = Math.round((geo.x1 - x1) / geo.px).toInt()
-        List(n) { k ->
-            val a = FloatArray(h * w) { s.readFloat() }
-            Frame(t0.minusSeconds(300L * (n - 1 - k)), Grid(geo.h, geo.w, DoubleArray(geo.h * geo.w) { i ->
-                val r = i / geo.w + dr; val c = i % geo.w + dc
-                if (r in 0 until h && c in 0 until w) a[r * w + c].toDouble() else Double.NaN
-            }), geo)
-        }
     }
 }

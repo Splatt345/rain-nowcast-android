@@ -146,5 +146,4 @@ fun GuideScreen(onBack: () -> Unit, modifier: Modifier = Modifier) {
     }
 }
 
-/** For someone with only the app: its own document, not a copy of the research training guide. */
 const val GUIDE = "train_your_region.md"

@@ -91,7 +91,6 @@ fun NowcastGraph(p: PointForecast, issued: Instant, now: Instant, modifier: Modi
             fun x(m: Int) = left + (m + SPAN) / (2f * SPAN) * (right - left)
             fun y(v: Double) = plotBottom - (v / yMax).toFloat().coerceIn(0f, 1.04f) * (plotBottom - top)
 
-            // grid + y labels
             val ticks = listOf(0.0, yMax / 2, yMax)
             for (t in ticks) {
                 drawLine(cs.outlineVariant.copy(alpha = 0.6f), Offset(left, y(t)), Offset(right, y(t)), 1f,
@@ -99,17 +98,14 @@ fun NowcastGraph(p: PointForecast, issued: Instant, now: Instant, modifier: Modi
                 text(measurer, fmt(t), label, Offset(4.dp.toPx(), y(t) - 7.dp.toPx()))
             }
             text(measurer, "mm/h", label, Offset(4.dp.toPx(), 0f))
-            // x labels
             for (m in listOf(-60, -30, 0, 30, 60)) {
                 val s = if (m == 0) "now" else if (m > 0) "+$m" else "$m"
                 val w = measurer.measure(s, label).size.width
                 text(measurer, s, label, Offset((x(m) - w / 2f).coerceIn(left - 4f, right - w), size.height - axisH + 2.dp.toPx()))
             }
-            // future tint
             drawRect(cs.primary.copy(alpha = 0.05f), Offset(x(0), top), Size(right - x(0), plotBottom - top))
 
             if (vis.isNotEmpty()) {
-                // band
                 val band = Path().apply {
                     vis.forEachIndexed { k, i -> if (k == 0) moveTo(x(rel[i]), y(p.p90[i])) else lineTo(x(rel[i]), y(p.p90[i])) }
                     vis.asReversed().forEach { i -> lineTo(x(rel[i]), y(p.p10[i])) }
@@ -126,7 +122,6 @@ fun NowcastGraph(p: PointForecast, issued: Instant, now: Instant, modifier: Modi
                 line(past, rel, { p.values[it] }, ::x, ::y, cs.onSurface.copy(alpha = 0.7f), 2.dp.toPx())
                 line(fut, rel, { p.values[it] }, ::x, ::y, cs.primary, 3.dp.toPx())
 
-                // probability strip
                 val sy = plotBottom + 6.dp.toPx()
                 val cw = (right - left) / (2f * SPAN) + 0.5f
                 for (i in vis) if (rel[i] >= 0)
@@ -134,11 +129,9 @@ fun NowcastGraph(p: PointForecast, issued: Instant, now: Instant, modifier: Modi
                 drawRoundRect(cs.outlineVariant, Offset(x(0), sy), Size(right - x(0), stripH), CornerRadius(3.dp.toPx()), style = Stroke(1f))
                 text(measurer, "chance", label, Offset((x(0) - measurer.measure("chance", label).size.width - 6.dp.toPx()), sy - 3.dp.toPx()))
             }
-            // now marker
             drawLine(cs.tertiary, Offset(x(0), top - 6.dp.toPx()), Offset(x(0), plotBottom), 1.5.dp.toPx())
             drawCircle(cs.tertiary, 3.dp.toPx(), Offset(x(0), top - 6.dp.toPx()))
 
-            // scrub readout
             sel?.let { i ->
                 val m = rel[i]; val cx = x(m)
                 drawLine(cs.onSurface.copy(alpha = 0.5f * selAlpha), Offset(cx, top), Offset(cx, plotBottom), 1.dp.toPx())

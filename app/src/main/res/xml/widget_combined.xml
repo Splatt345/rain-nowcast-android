@@ -4,7 +4,7 @@
     android:initialLayout="@layout/glance_default_loading_layout"
     android:previewImage="@drawable/widget_preview_combined"
     android:previewLayout="@layout/widget_preview_combined"
-    android:configure="nowcast.app.WidgetConfigActivity"
+    android:configure="nowcast.app.widget.WidgetConfigActivity"
     android:widgetFeatures="reconfigurable|configuration_optional"
     android:minWidth="250dp"
     android:minHeight="250dp"

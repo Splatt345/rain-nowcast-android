@@ -137,10 +137,6 @@ class EnsembleTest {
         val t0 = System.nanoTime()
         val r = ensemble(frames, nLead = 12, nMembers = 10)
         val secs = (System.nanoTime() - t0) / 1e9
-        println("ENSEMBLE_TIMING 10 members x 12 leads on ${hh}x$ww: %.1f s on %d threads".format(secs, Runtime.getRuntime().availableProcessors()))
-        val t1 = System.nanoTime()
-        ensemble(frames, nLead = 12, nMembers = 10, threads = 1)
-        println("ENSEMBLE_TIMING single thread: %.1f s".format((System.nanoTime() - t1) / 1e9))
         assertEquals(10, r.members.size)
         assertTrue("took $secs s", secs < 30)
     }

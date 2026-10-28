@@ -1,5 +1,6 @@
-package nowcast.app
+package nowcast.app.widget
 
+import nowcast.app.*
 import org.junit.Assert.*
 import org.junit.Rule
 import org.junit.Test

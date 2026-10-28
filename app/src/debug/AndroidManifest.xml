@@ -1,7 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <application>
-        <!-- Debug only: hosts real widget instances at exact sizes for screenshots. -->
-        <activity android:name=".WidgetGallery" android:exported="true" />
-    </application>
-</manifest>

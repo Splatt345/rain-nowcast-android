@@ -1,5 +1,6 @@
-package nowcast.app
+package nowcast.app.widget
 
+import nowcast.app.*
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas

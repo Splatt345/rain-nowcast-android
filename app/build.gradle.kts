@@ -45,7 +45,7 @@ android {
         }
     }
     buildFeatures { compose = true; buildConfig = true }
-    androidResources { noCompress += listOf("onnx", "h5") }
+    androidResources { noCompress += listOf("onnx") }
     // lz4-java's desktop natives (via jHDF): Android loads none of them and falls back to Java
     packaging { resources { excludes += listOf("net/jpountz/util/darwin/**", "net/jpountz/util/windows/**") } }
 }
@@ -60,8 +60,6 @@ dependencies {
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material3:material3-adaptive-navigation-suite")
     implementation("androidx.compose.material:material-icons-extended")
-    implementation("androidx.compose.ui:ui-tooling-preview")
-    debugImplementation("androidx.compose.ui:ui-tooling")
     implementation("androidx.activity:activity-compose:1.13.0")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.10.0")
     implementation("org.maplibre.gl:android-sdk:13.7.1")

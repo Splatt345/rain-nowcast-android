@@ -94,13 +94,11 @@ fun MapTimeline(f: MapFrames, minute: Int, onMinute: (Int) -> Unit, p: PointFore
         fun y(v: Double) = bottom - (v / yMax).toFloat().coerceIn(0f, 1.04f) * (bottom - top)
         val split = x(issuedMin.coerceIn(0, f.minutes))
 
-        // radar | forecast
         drawRoundRect(cs.onSurface.copy(alpha = 0.05f), Offset(left, top), Size(split - left, bottom - top), CornerRadius(6.dp.toPx()))
         drawRoundRect(cs.primary.copy(alpha = 0.10f), Offset(split, top), Size(right - split, bottom - top), CornerRadius(6.dp.toPx()))
         drawText(measurer, "RADAR", Offset(left + 6.dp.toPx(), top + 3.dp.toPx()), label)
         drawText(measurer, "FORECAST", Offset(split + 6.dp.toPx(), top + 3.dp.toPx()), label.copy(color = cs.primary))
 
-        // home's rain
         if (pts.isNotEmpty()) {
             val q = p!!
             val band = Path().apply {
@@ -128,7 +126,6 @@ fun MapTimeline(f: MapFrames, minute: Int, onMinute: (Int) -> Unit, p: PointFore
             drawText(measurer, s, Offset((x(m) - w / 2f).coerceIn(0f, size.width - w), bottom + 6.dp.toPx()), label)
         }
 
-        // now
         if (nowMin in 0..f.minutes) {
             val nx = x(nowMin)
             drawLine(cs.tertiary, Offset(nx, top), Offset(nx, bottom), 1.5.dp.toPx(),
@@ -137,7 +134,6 @@ fun MapTimeline(f: MapFrames, minute: Int, onMinute: (Int) -> Unit, p: PointFore
             drawText(measurer, "now", Offset((nx - w / 2f).coerceIn(0f, size.width - w), 0f), label.copy(color = cs.tertiary))
         }
 
-        // the minute on the map
         val cx = x(minute)
         drawLine(cs.onSurface, Offset(cx, top - 2.dp.toPx()), Offset(cx, bottom), 2.dp.toPx())
         drawCircle(cs.surface, 9.dp.toPx(), Offset(cx, bottom)); drawCircle(cs.onSurface, 7.dp.toPx(), Offset(cx, bottom))

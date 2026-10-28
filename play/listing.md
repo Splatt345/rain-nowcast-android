@@ -46,7 +46,7 @@ Data: radar © EUMETNET OPERA via MeteoGate (CC BY 4.0); forecasts by Open-Meteo
 | Feature graphic | `graphics/feature-1024x500.png` | 1024 × 500, no transparency |
 | Phone screenshots | `screenshots/1-now.png` … `5-settings.png` | 2–8, 1080 × 2400 is fine |
 
-The screenshots replay a real rainy hour (OPERA radar, 3 May 2026) in the debug build's demo mode: `screenshots/rain.sh`, then `screenshots/take.sh`. The 48-hour bars after the first hour are that day's live forecast.
+The screenshots replay a real rainy hour of OPERA radar (3 May 2026); the 48-hour bars after the first hour are the live forecast of the day they were taken. `screenshots/take.sh` retakes them from a running app.
 
 ## Release notes for 1.0.0 (500 max)
 

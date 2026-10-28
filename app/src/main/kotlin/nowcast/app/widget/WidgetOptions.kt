@@ -1,4 +1,4 @@
-package nowcast.app
+package nowcast.app.widget
 
 /** Per-widget choices, stored as strings in that widget's Glance state. Plain Kotlin so it is JVM-tested. */
 enum class WidgetType(val label: String) {
@@ -35,8 +35,8 @@ data class WidgetOptions(
         val KEYS = WidgetOptions().toMap().keys
 
         /**
-         * Widgets placed before options existed have an empty state: they get [default] (the provider's type)
-         * and the look they always had. Unknown or broken values fall back one by one.
+         * An empty state gets [default] (the provider's type) and the default look.
+         * Unknown or broken values fall back one by one.
          */
         fun fromMap(m: Map<String, *>, default: WidgetType = WidgetType.SUMMARY): WidgetOptions {
             fun s(k: String) = m[k]?.toString()

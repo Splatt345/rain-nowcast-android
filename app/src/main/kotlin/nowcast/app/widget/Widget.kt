@@ -1,5 +1,7 @@
-package nowcast.app
+package nowcast.app.widget
 
+import nowcast.app.*
+import nowcast.app.R
 import android.appwidget.AppWidgetManager
 import android.content.Context
 import android.os.Build
@@ -46,8 +48,7 @@ import kotlin.math.min
 
 /**
  * One implementation behind five picker entries; each entry only sets the type a new widget starts with.
- * Picker previews are previewImage/previewLayout: Glance's generated previews (Android 15+) dropped
- * every chart image on the API 36 AVD and showed text only.
+ * Picker previews are previewImage/previewLayout: Glance's generated previews drop the chart images.
  * Options live in the widget's Glance state, the data in [Snapshot]; [Widgets.REV] bumps make a running
  * session re-read both.
  */
@@ -70,7 +71,7 @@ class HoursWidget : RainWidgetBase(WidgetType.HOURS)
 class RadarWidget : RainWidgetBase(WidgetType.RADAR)
 class CombinedWidget : RainWidgetBase(WidgetType.COMBINED)
 
-/** The receiver class name stays: widgets already on home screens keep working as Summary. */
+/** RainWidget is the Summary widget. */
 class RainWidgetReceiver : GlanceAppWidgetReceiver() { override val glanceAppWidget: GlanceAppWidget = RainWidget() }
 class MinutesWidgetReceiver : GlanceAppWidgetReceiver() { override val glanceAppWidget: GlanceAppWidget = MinutesWidget() }
 class HoursWidgetReceiver : GlanceAppWidgetReceiver() { override val glanceAppWidget: GlanceAppWidget = HoursWidget() }

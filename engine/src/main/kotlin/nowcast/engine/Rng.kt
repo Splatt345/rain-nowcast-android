@@ -5,7 +5,7 @@ import kotlin.math.cos
 import kotlin.math.ln
 import kotlin.math.sqrt
 
-/** Counter-based SplitMix64 + Box-Muller; bit-identical to lite.uniforms/normals. */
+/** Counter-based SplitMix64 + Box-Muller: each value depends only on the seed and its index. */
 object Rng {
     private const val GOLDEN = -0x61c8864680b583ebL           // 0x9E3779B97F4A7C15
     private const val M1 = -0x40a7b892e31b1a47L               // 0xBF58476D1CE4E5B9

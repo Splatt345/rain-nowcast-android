@@ -35,7 +35,6 @@ class Prefs(ctx: Context) {
 
 /**
  * API keys per radar source, AES-GCM with a key that never leaves the Android Keystore.
- * (androidx.security-crypto's EncryptedSharedPreferences is deprecated in favour of exactly this.)
  */
 class Secrets(ctx: Context) {
     private val sp = ctx.getSharedPreferences("secrets", Context.MODE_PRIVATE)

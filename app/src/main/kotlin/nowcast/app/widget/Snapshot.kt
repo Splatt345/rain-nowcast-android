@@ -1,5 +1,6 @@
-package nowcast.app
+package nowcast.app.widget
 
+import nowcast.app.*
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import nowcast.engine.*

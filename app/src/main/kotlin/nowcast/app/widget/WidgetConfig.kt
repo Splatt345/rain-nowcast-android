@@ -1,5 +1,6 @@
-package nowcast.app
+package nowcast.app.widget
 
+import nowcast.app.*
 import android.annotation.SuppressLint
 import android.appwidget.AppWidgetManager
 import android.content.Context

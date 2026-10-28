@@ -1,6 +1,6 @@
 package nowcast.engine
 
-/** Dense coarse-to-fine Lucas-Kanade. Twin of lite.lk_pair / lite.motion. */
+/** Dense coarse-to-fine Lucas-Kanade optical flow. */
 class Motion(val vx: Grid, val vy: Grid)
 
 private const val LEVELS = 4

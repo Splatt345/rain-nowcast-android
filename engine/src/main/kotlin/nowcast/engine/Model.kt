@@ -10,14 +10,14 @@ import kotlin.math.ln1p
 
 class ModelException(msg: String) : Exception(msg)
 
-/** Twin of mlmodel.to_model / from_model. */
+/** mm/h to and from the model's scale: log1p, so 100 mm/h is 1. */
 object Transform {
     private val LOG_SCALE = ln(101.0)
     fun toModel(x: Double): Float = if (x.isNaN()) 0f else (ln1p(maxOf(x, 0.0)) / LOG_SCALE).toFloat()
     fun fromModel(y: Float): Float = expm1(y.toDouble().coerceIn(0.0, 1.0) * LOG_SCALE).toFloat()
 }
 
-/** SmaAt-UNet, 12 in -> 12 out. Same session settings as mlmodel._session (threads <= 4, no arena). */
+/** SmaAt-UNet, 12 in -> 12 out. At most 4 threads, no memory arena. */
 class SmaatModel(modelBytes: ByteArray) : AutoCloseable {
     private val env = OrtEnvironment.getEnvironment()
     private val session: OrtSession = env.createSession(modelBytes, OrtSession.SessionOptions().apply {

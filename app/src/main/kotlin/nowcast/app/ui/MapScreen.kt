@@ -148,7 +148,6 @@ fun MapScreen(repo: Repo, state: UiState, now: Instant) {
         val px = { dp: Int -> (dp * density.density).toInt() }
         m.moveCamera(CameraUpdateFactory.newLatLngBounds(LatLngBounds.from(b[3], b[2], b[1], b[0]), px(12), px(72), px(12), px(236)))
     }
-    // overlay
     val lut = remember(settings.palette, settings.radarColors) { settings.radarLut() }
     LaunchedEffect(style, frames, minute, lut) {
         val st = style ?: return@LaunchedEffect; val f = frames ?: return@LaunchedEffect
@@ -167,7 +166,6 @@ fun MapScreen(repo: Repo, state: UiState, now: Instant) {
             if (labels != null) st.addLayerBelow(layer, labels) else st.addLayer(layer)
         } else { src.setCoordinates(quad); src.setImage(bmp) }
     }
-    // home marker
     LaunchedEffect(style, settings.home) {
         val st = style ?: return@LaunchedEffect
         val pt = Point.fromLngLat(settings.home.second, settings.home.first)

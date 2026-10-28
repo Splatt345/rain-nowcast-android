@@ -135,8 +135,6 @@ private fun Main(repo: Repo, openRegions: () -> Unit, openGuide: () -> Unit, mod
             if (s.nowcastSource == NowcastSource.OPEN_METEO) Item(Icons.Outlined.Key, "Open-Meteo API key (optional)",
                 if (Repo.SOURCE_OPEN_METEO in keys) "Saved · requests go to the paid customer API"
                 else "Not needed for personal use; for commercial use or higher limits") { editKey = Repo.SOURCE_OPEN_METEO }
-            if (BuildConfig.DEBUG) Toggle(Icons.Outlined.Science, "Sample radar (debug)", "Bundled OPERA file, no key, no network",
-                s.demo) { v -> update { it.copy(demo = v) }; repo.kick(force = true) }
         }
 
         Section("Place")
@@ -241,7 +239,7 @@ private fun Main(repo: Repo, openRegions: () -> Unit, openGuide: () -> Unit, mod
             style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(start = 4.dp, top = 20.dp))
         TextButton({ licences = true }, Modifier.heightIn(min = 48.dp)) {
-            Text("Open-source licences · version ${nowcast.app.BuildConfig.VERSION_NAME}")
+            Text("Open-source licences · version ${BuildConfig.VERSION_NAME}")
         }
     }
 

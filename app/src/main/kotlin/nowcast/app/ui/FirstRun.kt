@@ -32,7 +32,7 @@ import kotlin.random.Random
 
 /** Asks for the MeteoGate ORD key, or goes on with Open-Meteo, which needs none. */
 @Composable
-fun FirstRun(onKey: (String) -> Unit, onOpenMeteo: () -> Unit, onDemo: (() -> Unit)?) {
+fun FirstRun(onKey: (String) -> Unit, onOpenMeteo: () -> Unit) {
     var key by rememberSaveable { mutableStateOf("") }
     var show by rememberSaveable { mutableStateOf(false) }
     val uri = LocalUriHandler.current
@@ -68,7 +68,6 @@ fun FirstRun(onKey: (String) -> Unit, onOpenMeteo: () -> Unit, onDemo: (() -> Un
                 Icon(Icons.AutoMirrored.Outlined.OpenInNew, null, Modifier.size(16.dp))
             }
             TextButton(onOpenMeteo, Modifier.heightIn(min = 48.dp)) { Text("No key? Use Open-Meteo's forecast instead (no radar map)") }
-            if (onDemo != null) TextButton(onDemo, Modifier.heightIn(min = 48.dp)) { Text("Try it with the bundled sample radar (debug)") }
         }
     }
 }
@@ -79,18 +78,15 @@ private fun RainArt(modifier: Modifier) {
     val drops = remember { val r = Random(7); List(46) { Triple(r.nextFloat(), r.nextFloat(), 0.4f + r.nextFloat() * 0.6f) } }
     Canvas(modifier.semantics { contentDescription = "" }) {
         drawRect(Brush.verticalGradient(listOf(cs.primaryContainer, cs.surfaceContainerHigh)))
-        // cloud
         val c = Offset(size.width * 0.52f, size.height * 0.36f)
         val r = size.minDimension * 0.17f
         listOf(Offset(-1.3f, 0.25f) to 0.75f, Offset(-0.3f, -0.1f) to 1f, Offset(0.8f, 0.12f) to 0.85f, Offset(1.6f, 0.38f) to 0.6f)
             .forEach { (o, s) -> drawCircle(cs.primary, r * s, Offset(c.x + o.x * r, c.y + o.y * r)) }
         drawRect(cs.primary, Offset(c.x - 1.3f * r, c.y + 0.2f * r), androidx.compose.ui.geometry.Size(2.9f * r, 0.75f * r))
-        // rain streaks
         for ((x, y, a) in drops) {
             val px = size.width * x; val py = size.height * (0.55f + y * 0.45f)
             drawLine(cs.primary.copy(alpha = 0.35f * a), Offset(px, py), Offset(px - 6f, py + 22f * a), 3f, StrokeCap.Round)
         }
-        // probability strip, the app's own motif
         val sy = size.height - 22f
         for (i in 0 until 24) {
             val p = (kotlin.math.sin(i / 3.5f) * 0.5f + 0.5f)

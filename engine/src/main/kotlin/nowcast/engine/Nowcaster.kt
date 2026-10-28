@@ -92,7 +92,7 @@ class Nowcaster(private val model: SmaatModel?, private val nMembers: Int = 10, 
      * The whole cycle (motion, ensemble, model, combine) on a boxKm square around the point only:
      * the cheap path for background "rain in N min" notifications. [frames] may be region frames
      * or already cropped to [pointBbox]; the box is clamped inside them. Not the full forecast -
-     * a small box sees less context (see the plan's interface notes for its measured error).
+     * a small box sees less context.
      */
     fun runPoint(region: Region, frames: List<Frame>, lat: Double, lon: Double, boxKm: Double = 128.0,
                  now: Instant = Instant.now()): PointForecast {

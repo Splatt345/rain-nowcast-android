@@ -78,7 +78,6 @@ fun OutlookChart(bars: List<Bar?>, zone: ZoneId, selected: Int?, onSelect: (Int)
         val bw = (slot * 0.72f).coerceAtLeast(1.5f)
         fun y(mm: Double) = bottom - sqrt((mm / yMax).coerceIn(0.0, 1.0)).toFloat() * (bottom - top)
 
-        // selection column
         if (selected != null && hl.value >= 0)
             drawRoundRect(cs.primary.copy(alpha = 0.12f), Offset(hl.value * slot - slot * 0.6f, top - 6.dp.toPx()),
                 Size(slot * 2.2f, bottom - top + 6.dp.toPx()), CornerRadius(4.dp.toPx()))

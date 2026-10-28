@@ -27,7 +27,6 @@ data class Settings(
     val background: Boolean = true,
     val useModel: Boolean = true,
     val nowcastSource: NowcastSource = NowcastSource.RADAR,
-    val demo: Boolean = false,                         // debug builds only: bundled sample radar, no key
 ) {
     fun radarLut(): IntArray = if (palette == Render.CUSTOM) Render.lut(Render.stops(radarColors)) else Render.lut(palette)
 
@@ -42,7 +41,7 @@ data class Settings(
         put("accent", hex(accent)); put("darkMode", darkMode.name)
         put("notify", notify.toString())
         put("notifyLeadMin", notifyLeadMin.toString()); put("notifyThreshold", notifyThreshold.toString())
-        put("background", background.toString()); put("useModel", useModel.toString()); put("demo", demo.toString())
+        put("background", background.toString()); put("useModel", useModel.toString())
         put("nowcastSource", nowcastSource.name)
     }
 
@@ -79,7 +78,6 @@ data class Settings(
                 notifyThreshold = (s("notifyThreshold")?.toDoubleOrNull()?.takeIf { it.isFinite() } ?: d.notifyThreshold)
                     .coerceIn(THRESHOLD_RANGE.start, THRESHOLD_RANGE.endInclusive),
                 background = b("background", d.background), useModel = b("useModel", d.useModel),
-                demo = b("demo", d.demo),
                 nowcastSource = NowcastSource.entries.firstOrNull { it.name == s("nowcastSource") } ?: d.nowcastSource,
             )
         }

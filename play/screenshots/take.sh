@@ -1,6 +1,6 @@
 #!/bin/bash
 # Store screenshots from a running app (radar mode, a forecast loaded): ./play/screenshots/take.sh
-# Rainy promo set: debug build, push an archived hour with rain.sh first. SERIAL picks the device.
+# Best taken while it rains. SERIAL picks the device.
 # tap(text): taps the node whose text or content-desc matches, via uiautomator
 A="$HOME/Android/platform-tools/adb -s ${SERIAL:-emulator-5600}"; S=$(mktemp -d)
 tap() { $A shell uiautomator dump /sdcard/u.xml >/dev/null; $A pull /sdcard/u.xml $S/u.xml >/dev/null

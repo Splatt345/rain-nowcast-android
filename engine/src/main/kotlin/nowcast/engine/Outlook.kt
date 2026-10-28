@@ -32,7 +32,7 @@ class Outlook(val bars: List<Bar>, val fetched: Instant, val usedModel: Boolean,
               val meta: OutlookMeta = OutlookMeta.BELGIUM)
 
 /**
- * What outlook_gbm.json says about its model (research nowcast/outlook_export.py): the Open-Meteo
+ * What outlook_gbm.json says about its model: the Open-Meteo
  * models it reads, the ensemble that fills in, and the extent of its training points. lat and lon
  * are features, so outside that extent the trees extrapolate: at Amsterdam the Belgian model turned
  * all-dry NWP into 0.44 mm at 33 % in every hour. There the ensemble is used instead.
@@ -65,7 +65,7 @@ class OutlookMeta(val models: List<String>, val ensemble: String, val trainedBbo
     }
 }
 
-/** The feature row of outlook_train.assemble, in outlook_gbm.json order. */
+/** The model's feature row, in outlook_gbm.json order. */
 object OutlookFeatures {
     fun names(models: List<String>) = models + models.map { "${it}_prev_hour" } + models.map { "${it}_next_hour" } +
         listOf("model_mean", "model_max", "sin_hour", "cos_hour", "sin_doy", "cos_doy", "lat", "lon", "lead_bucket")
@@ -88,7 +88,7 @@ object OutlookFeatures {
     }
 }
 
-/** outlook_gbm.onnx: input "x" (n, 3 × models + 9), output "quantiles" (n, 9); sorted and clipped like predict_gbm. */
+/** outlook_gbm.onnx: input "x" (n, 3 × models + 9), output "quantiles" (n, 9); quantiles sorted and clipped. */
 class OutlookModel(bytes: ByteArray, val meta: OutlookMeta = OutlookMeta.BELGIUM) : AutoCloseable {
     private val env = OrtEnvironment.getEnvironment()
     private val session: OrtSession = env.createSession(bytes, OrtSession.SessionOptions())

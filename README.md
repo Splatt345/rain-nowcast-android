@@ -30,7 +30,7 @@ Every five minutes the app takes the last hour of EUMETNET OPERA radar, estimate
 <img src="play/screenshots/widgets/combined-large.png" width="300" alt="Combined widget">
 </p>
 
-The screenshots replay a real rainy hour of OPERA radar (3 May 2026) in the debug build's demo mode; see `play/screenshots/rain.sh`.
+The screenshots show a real rainy hour of OPERA radar (3 May 2026), replayed.
 
 The radar comes from MeteoGate's Open Radar Data API and needs a free personal key from [meteogate.eu](https://meteogate.eu).
 
@@ -46,8 +46,6 @@ Needs JDK 17 and the Android SDK (compileSdk 36).
 ./gradlew :app:bundleRelease                 # for Google Play; see play/README.md for signing
 ```
 
-The debug build has a demo mode (the bundled radar sample, no key) on the first screen.
-
 **Emulators without Vulkan:** the map uses MapLibre's Vulkan build. For an emulator that has no Vulkan, swap `org.maplibre.gl:android-sdk` for `org.maplibre.gl:android-sdk-opengl` (same version) in `app/build.gradle.kts` for that build only.
 
 ## Layout
@@ -59,7 +57,6 @@ The debug build has a demo mode (the bundled radar sample, no key) on the first 
 | `play/` | Google Play listing, graphics, privacy policy and Console answers |
 | `fastlane/` | Store metadata in the layout F-Droid reads |
 | `fdroid/` | Draft F-Droid build metadata |
-| `docs/` | Design notes and screenshots |
 
 ## Data
 
