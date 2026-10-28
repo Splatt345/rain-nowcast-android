@@ -9,7 +9,8 @@ AutoName: Rain Nowcast
 
 RepoType: git
 Repo: https://github.com/Splatt345/rain-nowcast-android.git
-Binaries: https://github.com/Splatt345/rain-nowcast-android/releases/download/v%v/nowcast.app_%c.apk
+Binaries: 
+  https://github.com/Splatt345/rain-nowcast-android/releases/download/v%v/nowcast.app_%c.apk
 
 Builds:
   - versionName: 1.0.0
