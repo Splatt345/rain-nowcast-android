@@ -29,10 +29,15 @@ class CacheTest {
 
     @Test fun mapFramesRoundTrip() {
         val f = MapFrames(listOf(ByteArray(6) { it.toByte() }, ByteArray(6)), 3, 2, listOf(t, t.plusSeconds(300)),
-            listOf(2.0, 49.0, 7.0, 52.0), "belgium", t, 0)
+            listOf(2.0, 49.0, 7.0, 52.0), "belgium", t, 0, Render.RasterMotion(2, 2, 8, floatArrayOf(1f, 2f, 3f, 4f), FloatArray(4)))
         MapFrames.write(tmp.root, f)
         val g = MapFrames.read(tmp.root)!!
         assertArrayEquals(f.levels[0], g.levels[0]); assertEquals(f.times, g.times); assertEquals(f.bbox, g.bbox)
         assertEquals("belgium", g.regionId); assertEquals(t, g.issued); assertEquals(3, g.w)
+        assertArrayEquals(f.motion.dx, g.motion.dx, 0f)
+
+        assertEquals(5, g.minutes)
+        assertEquals(0 to 0.0, g.locate(0)); assertEquals(0 to 0.4, g.locate(2)); assertEquals(1 to 0.0, g.locate(5).let { (k, d) -> if (d == 1.0) k + 1 to 0.0 else k to d })
+        assertSame(g.levels[0], g.levelsAt(0)); assertSame(g.levels[1], g.levelsAt(5))
     }
 }

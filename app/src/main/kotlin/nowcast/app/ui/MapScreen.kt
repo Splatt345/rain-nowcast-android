@@ -59,6 +59,7 @@ import org.maplibre.android.style.sources.ImageSource
 import org.maplibre.geojson.Point
 import java.time.Duration
 import java.time.Instant
+import kotlin.math.roundToInt
 
 /** OpenFreeMap vector basemaps (no key, no limits): Dark at night, Positron by day. */
 fun mapStyle(dark: Boolean): Style.Builder =
@@ -95,7 +96,7 @@ private fun render(fc: Forecast): MapFrames {
     val fields = fc.past.map { f -> FloatArray(f.rain.v.size) { f.rain.v[it].toFloat() } } + fc.mean.toList()
     val times = fc.past.map { it.time } + (1..fc.mean.size).map { fc.issued.plusSeconds(60L * fc.intervalMinutes * it) }
     return MapFrames(fields.map { Render.levels(it, fc.geo.h, fc.geo.w, s) }, s.width, s.height, times, fc.region.bbox,
-        fc.region.id, fc.issued, fc.past.size - 1)
+        fc.region.id, fc.issued, fc.past.size - 1, Render.rasterMotion(fc.motion, s))
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -109,7 +110,7 @@ fun MapScreen(repo: Repo, state: UiState, now: Instant) {
     var style by remember { mutableStateOf<Style?>(null) }
     val fc = state.forecast
     var frames by remember { mutableStateOf<MapFrames?>(null) }
-    var index by rememberSaveable { mutableIntStateOf(-1) }
+    var minute by rememberSaveable { mutableIntStateOf(-1) }
     var playing by remember { mutableStateOf(false) }
     var sheet by remember { mutableStateOf<LatLng?>(null) }
     var sheetPoint by remember { mutableStateOf<PointForecast?>(null) }
@@ -126,11 +127,11 @@ fun MapScreen(repo: Repo, state: UiState, now: Instant) {
             render(fc).also { runCatching { MapFrames.write(ctx.filesDir, it) } }
         }
         frames = f
-        if (index !in f.levels.indices) index = f.newest          // the newest radar frame
+        if (minute !in 0..f.minutes) minute = f.minuteOf(f.newest)          // the newest radar frame
     }
     LaunchedEffect(playing, frames) {
         val f = frames ?: return@LaunchedEffect
-        while (playing) { delay(450); index = (index + 1) % f.levels.size }
+        while (playing) { delay(100); minute = (minute + 1) % (f.minutes + 1) }          // a minute at a time
     }
 
     LaunchedEffect(mapView, dark) {
@@ -155,11 +156,11 @@ fun MapScreen(repo: Repo, state: UiState, now: Instant) {
     }
     // overlay
     val lut = remember(settings.palette, settings.radarColors) { settings.radarLut() }
-    LaunchedEffect(style, frames, index, lut) {
+    LaunchedEffect(style, frames, minute, lut) {
         val st = style ?: return@LaunchedEffect; val f = frames ?: return@LaunchedEffect
-        if (index !in f.levels.indices) return@LaunchedEffect
+        if (minute !in 0..f.minutes) return@LaunchedEffect
         val bmp = withContext(Dispatchers.Default) {
-            Bitmap.createBitmap(Render.argb(f.levels[index], lut), f.w, f.h, Bitmap.Config.ARGB_8888)
+            Bitmap.createBitmap(Render.argb(f.levelsAt(minute), lut), f.w, f.h, Bitmap.Config.ARGB_8888)
         }
         val b = f.bbox
         val quad = LatLngQuad(LatLng(b[3], b[0]), LatLng(b[3], b[2]), LatLng(b[1], b[2]), LatLng(b[1], b[0]))
@@ -202,13 +203,13 @@ fun MapScreen(repo: Repo, state: UiState, now: Instant) {
                     Text(if (!repo.hasKey) "The radar map needs a MeteoGate key (Settings). The Now screen and widgets use Open-Meteo without one."
                         else "Open-Meteo mode loads no radar for home. Tap a place in Europe to load the radar there.",
                         Modifier.padding(12.dp), style = MaterialTheme.typography.bodyMedium)
-                } else if (f == null || index !in f.levels.indices) {
+                } else if (f == null || minute !in 0..f.minutes) {
                     Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
                         CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp); Spacer(Modifier.width(12.dp))
                         Text(if (fc == null) "Waiting for the radar…" else "Drawing the forecast…")
                     }
                 } else {
-                    val t = f.times[index]
+                    val t = f.time(minute)
                     val rel = Duration.between(now, t).toMinutes().toInt()
                     val future = t > f.issued
                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -224,9 +225,10 @@ fun MapScreen(repo: Repo, state: UiState, now: Instant) {
                         }
                         RateLegend(lut)
                     }
-                    Slider(index.toFloat(), { v -> val i = v.toInt(); if (i != index) { index = i; playing = false
-                            haptic.performHapticFeedback(HapticFeedbackType.SegmentFrequentTick) } },
-                        valueRange = 0f..(f.levels.size - 1).toFloat(), steps = f.levels.size - 2,
+                    // by the minute; a tick on each real frame
+                    Slider(minute.toFloat(), { v -> val i = v.roundToInt(); if (i != minute) { minute = i; playing = false
+                            if (f.locate(i).second == 0.0) haptic.performHapticFeedback(HapticFeedbackType.SegmentFrequentTick) } },
+                        valueRange = 0f..f.minutes.toFloat(),
                         modifier = Modifier.padding(start = 10.dp).semantics { stateDescription = if (rel >= 0) "plus $rel minutes" else "$rel minutes" })
                 }
             }

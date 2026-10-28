@@ -127,6 +127,63 @@ object Render {
         }
     }
 
+    /** Motion on a coarse grid over a Mercator raster, in raster pixels per frame step: the card's state.motion. */
+    class RasterMotion(val w: Int, val h: Int, val step: Int, val dx: FloatArray, val dy: FloatArray)
+
+    /**
+     * [m] (source pixels per frame step) carried onto the raster [s] samples: at each coarse node the
+     * raster->source Jacobian, from its neighbours, is inverted. The field is smooth, so every [step] px is plenty.
+     */
+    fun rasterMotion(m: Motion, s: Sampler, step: Int = 8): RasterMotion {
+        val W = s.width; val H = s.height
+        val mw = (W - 1) / step + 2; val mh = (H - 1) / step + 2
+        val dx = FloatArray(mw * mh); val dy = FloatArray(mw * mh)
+        for (gy in 0 until mh) for (gx in 0 until mw) {
+            val x = minOf(gx * step, W - 1); val y = minOf(gy * step, H - 1)
+            val xa = maxOf(x - 1, 0); val xb = minOf(x + 1, W - 1); val ya = maxOf(y - 1, 0); val yb = minOf(y + 1, H - 1)
+            fun d(a: DoubleArray, i: Int, j: Int, n: Int) = if (n == 0) 0.0 else (a[j] - a[i]) / n
+            val dcdx = d(s.cols, y * W + xa, y * W + xb, xb - xa); val drdx = d(s.rows, y * W + xa, y * W + xb, xb - xa)
+            val dcdy = d(s.cols, ya * W + x, yb * W + x, yb - ya); val drdy = d(s.rows, ya * W + x, yb * W + x, yb - ya)
+            val det = dcdx * drdy - dcdy * drdx
+            if (abs(det) < 1e-12) continue
+            val r = s.rows[y * W + x]; val c = s.cols[y * W + x]
+            val vx = sampleClamped(m.vx, r, c); val vy = sampleClamped(m.vy, r, c)
+            dx[gy * mw + gx] = ((vx * drdy - dcdy * vy) / det).toFloat()
+            dy[gy * mw + gx] = ((dcdx * vy - drdx * vx) / det).toFloat()
+        }
+        return RasterMotion(mw, mh, step, dx, dy)
+    }
+
+    /**
+     * A minute between two frames, fraction [d] of the way from [a] to [b]: [a] traced forward along the motion,
+     * [b] traced back, blended. A shower moves rather than fading in. The card's warpBetween, blended in level
+     * as it is there.
+     */
+    fun warp(a: ByteArray, b: ByteArray, w: Int, h: Int, m: RasterMotion, d: Double): ByteArray {
+        fun samp(src: ByteArray, x0: Double, y0: Double): Double {
+            val x = x0.coerceIn(0.0, w - 1.0); val y = y0.coerceIn(0.0, h - 1.0)
+            val xi = x.toInt(); val yi = y.toInt(); val tx = x - xi; val ty = y - yi
+            val x1 = minOf(xi + 1, w - 1); val y1 = minOf(yi + 1, h - 1)
+            fun v(r: Int, c: Int) = (src[r * w + c].toInt() and 255).toDouble()
+            return v(yi, xi) * (1 - tx) * (1 - ty) + v(yi, x1) * tx * (1 - ty) + v(y1, xi) * (1 - tx) * ty + v(y1, x1) * tx * ty
+        }
+        val out = ByteArray(w * h); val mw = m.w
+        for (y in 0 until h) {
+            val fy = y.toDouble() / m.step; val y0 = minOf(fy.toInt(), m.h - 2); val ty = fy - y0
+            for (x in 0 until w) {
+                val fx = x.toDouble() / m.step; val x0 = minOf(fx.toInt(), mw - 2); val tx = fx - x0
+                val i = y0 * mw + x0
+                val w00 = (1 - tx) * (1 - ty); val w10 = tx * (1 - ty); val w01 = (1 - tx) * ty; val w11 = tx * ty
+                val vx = m.dx[i] * w00 + m.dx[i + 1] * w10 + m.dx[i + mw] * w01 + m.dx[i + mw + 1] * w11
+                val vy = m.dy[i] * w00 + m.dy[i + 1] * w10 + m.dy[i + mw] * w01 + m.dy[i + mw + 1] * w11
+                val back = samp(a, x - vx * d, y - vy * d)
+                val fwd = samp(b, x + vx * (1 - d), y + vy * (1 - d))
+                out[y * w + x] = ((1 - d) * back + d * fwd + 0.5).toInt().toByte()
+            }
+        }
+        return out
+    }
+
     fun levels(field: FloatArray, h: Int, w: Int, s: Sampler): ByteArray =
         resample(field, h, w, s).let { v -> ByteArray(v.size) { level(v[it]).toByte() } }
 
