@@ -45,12 +45,13 @@ import kotlin.math.min
 
 /**
  * One implementation behind five picker entries; each entry only sets the type a new widget starts with.
+ * Picker previews are previewImage/previewLayout: Glance's generated previews (Android 15+) dropped
+ * every chart image on the API 36 AVD and showed text only.
  * Options live in the widget's Glance state, the data in [Snapshot]; [Widgets.REV] bumps make a running
  * session re-read both.
  */
 abstract class RainWidgetBase(val defaultType: WidgetType) : GlanceAppWidget() {
     override val sizeMode = SizeMode.Responsive(WidgetLayout.BUCKETS.map { DpSize(it.first.dp, it.second.dp) }.toSet())
-    override val previewSizeMode = SizeMode.Responsive(setOf(previewSize(defaultType)))
 
     override suspend fun provideGlance(context: Context, id: GlanceId) {
         provideContent {
@@ -58,18 +59,6 @@ abstract class RainWidgetBase(val defaultType: WidgetType) : GlanceAppWidget() {
             val opts = Widgets.options(prefs, defaultType)
             val snap = remember(prefs[Widgets.REV]) { Snapshot.read(context.filesDir) }
             WidgetContent(context, opts, snap, Instant.now(), actualSizes(LocalAppWidgetOptions.current))
-        }
-    }
-
-    override suspend fun providePreview(context: Context, widgetCategory: Int) {
-        val snap = Snapshot.read(context.filesDir) ?: Snapshot.sample()
-        provideContent { WidgetContent(context, WidgetOptions(type = defaultType), snap, Instant.now(), emptyList()) }
-    }
-
-    companion object {
-        fun previewSize(t: WidgetType) = when (t) {
-            WidgetType.COMBINED -> DpSize(WidgetLayout.LARGE.first.dp, WidgetLayout.LARGE.second.dp)
-            else -> DpSize(WidgetLayout.MEDIUM.first.dp, WidgetLayout.MEDIUM.second.dp)
         }
     }
 }
@@ -111,13 +100,6 @@ object Widgets {
             updateAppWidgetState(ctx, id) { it[REV] = rev }
             w.update(ctx, id)
         }
-    }
-
-    /** Android 15+ picker previews; the system rate-limits this to about two calls an hour. */
-    suspend fun publishPreviews(ctx: Context) {
-        if (Build.VERSION.SDK_INT < 35) return
-        val m = GlanceAppWidgetManager(ctx)
-        for ((r, _) in ALL) runCatching { m.setWidgetPreviews(r.kotlin) }
     }
 }
 
@@ -226,7 +208,8 @@ private fun Header(w: W, chanceSp: Int = 26) {
 
 @Composable
 private fun Sentence(w: W, text: String = w.sentence, sp: Int = 15, lines: Int = 2) =
-    Text(text, maxLines = lines, style = TextStyle(color = GlanceTheme.colors.onSurface, fontSize = sp.sp, fontWeight = FontWeight.Medium))
+    Text(text, maxLines = lines, modifier = GlanceModifier.fillMaxWidth(),
+        style = TextStyle(color = GlanceTheme.colors.onSurface, fontSize = sp.sp, fontWeight = FontWeight.Medium))
 
 @Composable
 private fun Chart(layers: List<Layer>, desc: String, modifier: GlanceModifier) {
@@ -268,7 +251,7 @@ private fun Summary(w: W, cls: SizeClass) {
                 Text("$it%", style = TextStyle(color = GlanceTheme.colors.primary, fontSize = 22.sp, fontWeight = FontWeight.Bold))
                 Spacer(GlanceModifier.width(8.dp))
             }
-            Column(GlanceModifier.defaultWeight()) {
+            Column(GlanceModifier.defaultWeight().fillMaxHeight(), verticalAlignment = Alignment.CenterVertically) {
                 Sentence(w, sp = 13, lines = if (w.ih >= 44) 2 else 1)
                 AgeText(w, 11)
             }
