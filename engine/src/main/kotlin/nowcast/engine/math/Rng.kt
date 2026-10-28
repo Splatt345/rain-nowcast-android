@@ -22,8 +22,6 @@ object Rng {
     fun uniforms(seed: Long, n: Int) = DoubleArray(n) { uniform(seed, it) }
 
     /** Normal i from uniforms 2i and 2i+1; each depends only on its index, so [par] may split it. */
-    fun normals(seed: Long, n: Int, par: Par = Par.SERIAL): DoubleArray = normalsInto(seed, DoubleArray(n), par)
-
     fun normalsInto(seed: Long, out: DoubleArray, par: Par = Par.SERIAL): DoubleArray {
         par.run(out.size) { start, end ->
             for (i in start until end)

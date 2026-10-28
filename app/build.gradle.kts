@@ -3,6 +3,8 @@ plugins {
     kotlin("plugin.compose")
     kotlin("plugin.serialization")
 }
+// versionCode * 10 + this, so each ABI's APK has its own versionCode (fdroid/nowcast.app.yml: VercodeOperation)
+val ABI_CODES = mapOf("arm64-v8a" to 2, "x86_64" to 4)
 android {
     namespace = "nowcast.app"
     compileSdk = 36
@@ -13,7 +15,6 @@ android {
         versionCode = 1
         versionName = "1.0.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
-        ndk { abiFilters += listOf("arm64-v8a", "x86_64") }
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -27,9 +28,18 @@ android {
         }
     }
     buildFeatures { compose = true; buildConfig = true }
-    androidResources { noCompress += listOf("onnx") }
+    // one APK per ABI, each with only its own onnxruntime and MapLibre libraries
+    splits { abi { isEnable = true; reset(); include(*ABI_CODES.keys.toTypedArray()); isUniversalApk = false } }
     // lz4-java's desktop natives (via jHDF): Android loads none of them and falls back to Java
     packaging { resources { excludes += listOf("net/jpountz/util/darwin/**", "net/jpountz/util/windows/**") } }
+}
+androidComponents {
+    onVariants { variant ->
+        variant.outputs.forEach { output ->
+            val abi = output.filters.find { it.filterType == com.android.build.api.variant.FilterConfiguration.FilterType.ABI }?.identifier
+            output.versionCode.set(output.versionCode.get() * 10 + (ABI_CODES[abi] ?: 0))
+        }
+    }
 }
 dependencies {
     implementation(project(":engine"))

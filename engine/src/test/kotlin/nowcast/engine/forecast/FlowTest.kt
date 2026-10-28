@@ -9,7 +9,7 @@ import org.junit.Test
 class FlowTest {
     @Test fun rngMatchesPython() {
         assertClose(Fixture.arr("uniforms_seed5"), Rng.uniforms(5, 8), 1e-15, "uniforms")
-        assertClose(Fixture.arr("normals_seed5"), Rng.normals(5, 8), 1e-12, "normals")
+        assertClose(Fixture.arr("normals_seed5"), Rng.normalsInto(5, DoubleArray(8)), 1e-12, "normals")
     }
 
     @Test fun blurMatchesPython() {

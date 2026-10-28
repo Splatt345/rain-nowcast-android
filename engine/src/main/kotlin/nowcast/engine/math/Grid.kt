@@ -2,7 +2,6 @@ package nowcast.engine.math
 
 import kotlin.math.floor
 import kotlin.math.log10
-import kotlin.math.pow
 
 /**
  * Splits [0, count) into [ways] contiguous chunks run at once, one on the caller and the rest on
@@ -28,14 +27,12 @@ class Grid(val rows: Int, val cols: Int, val values: DoubleArray = DoubleArray(r
     inline fun map(f: (Double) -> Double) = Grid(rows, cols, DoubleArray(values.size) { f(values[it]) })
 }
 
-const val WET_DB = -10.0   // 0.1 mm/h
 const val DRY_DB = -15.0
 const val MAX_DB = 20.0    // 100 mm/h, same ceiling as Odim.MAX_DBZ and the model transform
 
 fun toDb(rain: Double): Double =
     if (!rain.isNaN() && rain >= 0.1) 10.0 * log10(rain) else DRY_DB
 
-fun fromDb(db: Double): Double = if (db >= WET_DB) 10.0.pow(db / 10.0) else 0.0
 
 private fun clampI(i: Int, n: Int) = if (i < 0) 0 else if (i >= n) n - 1 else i
 

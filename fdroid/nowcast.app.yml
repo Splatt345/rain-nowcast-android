@@ -13,15 +13,28 @@ AutoName: Rain Nowcast
 RepoType: git
 Repo: https://github.com/Splatt345/rain-nowcast-android.git
 
+# One APK per ABI (app/build.gradle.kts splits): versionCode * 10 + 2 for arm64-v8a, + 4 for x86_64.
 Builds:
   - versionName: 1.0.0
-    versionCode: 1
+    versionCode: 12
     commit: v1.0.0
     subdir: app
     gradle:
       - yes
+    output: build/outputs/apk/release/app-arm64-v8a-release-unsigned.apk
+
+  - versionName: 1.0.0
+    versionCode: 14
+    commit: v1.0.0
+    subdir: app
+    gradle:
+      - yes
+    output: build/outputs/apk/release/app-x86_64-release-unsigned.apk
 
 AutoUpdateMode: Version
 UpdateCheckMode: Tags
+VercodeOperation:
+  - 10*%c+2
+  - 10*%c+4
 CurrentVersion: 1.0.0
-CurrentVersionCode: 1
+CurrentVersionCode: 14

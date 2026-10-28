@@ -41,9 +41,9 @@ The Home Assistant add-on and integration that run the same nowcast on a server 
 Needs JDK 17 and the Android SDK (compileSdk 36).
 
 ```bash
-./gradlew :app:assembleDebug                 # app/build/outputs/apk/debug/app-debug.apk
+./gradlew :app:assembleDebug                 # app/build/outputs/apk/debug/app-arm64-v8a-debug.apk (and x86_64)
 ./gradlew :engine:test :app:testDebugUnitTest
-./gradlew :app:assembleRelease               # unsigned; F-Droid builds and signs its own
+./gradlew :app:assembleRelease               # one unsigned APK per ABI; F-Droid builds and signs its own
 ```
 
 **Emulators without Vulkan:** the map uses MapLibre's Vulkan build. For an emulator that has no Vulkan, swap `org.maplibre.gl:android-sdk` for `org.maplibre.gl:android-sdk-opengl` (same version) in `app/build.gradle.kts` for that build only.
