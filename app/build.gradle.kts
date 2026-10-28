@@ -1,6 +1,7 @@
 plugins {
     id("com.android.application")
     kotlin("plugin.compose")
+    kotlin("plugin.serialization")
 }
 android {
     namespace = "nowcast.app"
