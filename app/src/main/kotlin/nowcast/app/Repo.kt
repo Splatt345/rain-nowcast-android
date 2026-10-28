@@ -355,12 +355,28 @@ object Demo {
         val base = Odim.readCrop(f, region)
         val now = Instant.now().epochSecond
         val t0 = Instant.ofEpochSecond(now - now % 300)
+        File(ctx.filesDir, "demo_frames.bin").takeIf { it.exists() }?.let { return replay(it, base.geo, t0) }
         val g = base.rain
         return List(12) { k ->
             val dx = 2 * (11 - k)
             Frame(t0.minusSeconds(300L * (11 - k)),
                 Grid(g.h, g.w, DoubleArray(g.h * g.w) { i -> val c = i % g.w + dx; if (c < g.w) g.v[i - i % g.w + c] else 0.0 }),
                 base.geo)
+        }
+    }
+
+    /** An archived hour pushed by play/screenshots/rain.sh (n, h, w; x1, y2, px, py; projdef;
+     *  n*h*w float32 mm/h on the same 1 km OPERA grid), cut to the region's crop and restamped to now. */
+    private fun replay(f: File, geo: GridGeo, t0: Instant): List<Frame> = java.io.DataInputStream(f.inputStream().buffered()).use { s ->
+        val n = s.readInt(); val h = s.readInt(); val w = s.readInt()
+        val x1 = s.readDouble(); val y2 = s.readDouble(); s.readDouble(); s.readDouble(); s.readUTF()
+        val dr = Math.round((y2 - geo.y2) / geo.py).toInt(); val dc = Math.round((geo.x1 - x1) / geo.px).toInt()
+        List(n) { k ->
+            val a = FloatArray(h * w) { s.readFloat() }
+            Frame(t0.minusSeconds(300L * (n - 1 - k)), Grid(geo.h, geo.w, DoubleArray(geo.h * geo.w) { i ->
+                val r = i / geo.w + dr; val c = i % geo.w + dc
+                if (r in 0 until h && c in 0 until w) a[r * w + c].toDouble() else Double.NaN
+            }), geo)
         }
     }
 }
