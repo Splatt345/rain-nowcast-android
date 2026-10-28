@@ -312,11 +312,14 @@ internal fun fromDbSteps(db: Double): Float {
     return if (r < 0.1) 0f else r.toFloat()
 }
 
+/** Holds only what members read: the band weights and older cascades go after init, ~20 MB
+ *  for Belgium that would otherwise sit on the heap through the whole ensemble. */
 internal class StepsSetup(
-    val p: Int, val wts: Array<DoubleArray>, val filt: DoubleArray, val cascades: List<Cascade>,
+    val p: Int, wts: Array<DoubleArray>, val filt: DoubleArray, cascades: List<Cascade>,
     val gammaRaw: Array<DoubleArray>, val gamma: Array<DoubleArray>, val phi: Array<DoubleArray>,
     val last: DoubleArray, val lastSorted: DoubleArray, val fft: Fft2, val par: Par,
 ) {
+    val lastCascade = cascades.last()
     /** Half spectra (columns 0..w/2) of the last p cascades' normalised levels, [level][lag] as
      *  re, im pairs: the AR(p) recursion is linear, so members run it in Fourier space. */
     val spec: Array<Array<Pair<DoubleArray, DoubleArray>>> = Array(N_LEVELS) { i -> Array(p) { j ->
@@ -363,7 +366,7 @@ internal fun setup(db3: List<DoubleArray>, mo: Motion, par: Par = Par.SERIAL): S
 internal fun member(s: StepsSetup, mo: Motion, m: Int, nLead: Int, seed: Long, kmPerPixel: Double,
                     timestep: Double, onFirst: ((DoubleArray, DoubleArray) -> Unit)? = null, par: Par = s.par): Array<FloatArray> {
     val h = mo.vx.h; val w = mo.vx.w; val n = h * w; val p = s.p
-    val mu = s.cascades.last().mu; val sd = s.cascades.last().sd
+    val mu = s.lastCascade.mu; val sd = s.lastCascade.sd
     val radius = structRadius(kmPerPixel, timestep)
     val dist = IntArray(n); val sortBuf = SortBuf(n)
     val mask = DoubleArray(n)
@@ -373,11 +376,6 @@ internal fun member(s: StepsSetup, mo: Motion, m: Int, nLead: Int, seed: Long, k
     val epsPar = laplace(u[0]); val epsPerp = laplace(u[1])
     // BPS unit vectors, fixed per run
     val vsf = 60.0 / (timestep * (1.0 / kmPerPixel))
-    val parX = DoubleArray(n); val parY = DoubleArray(n)
-    for (i in 0 until n) {
-        val a = mo.vx.v[i]; val b = mo.vy.v[i]; val nn = sqrt(a * a + b * b)
-        if (nn > 1e-12) { parX[i] = a / nn; parY[i] = b / nn }
-    }
     val dx = DoubleArray(n); val dy = DoubleArray(n)
     // The cascade lives in Fourier space (half spectrum, h x hw): the noise is W * filt * band,
     // each level normalised by its Parseval std, and only the recomposed field is transformed
@@ -415,7 +413,7 @@ internal fun member(s: StepsSetup, mo: Motion, m: Int, nLead: Int, seed: Long, k
     }
 
     // per-lead buffers, reused: allocation, not arithmetic, is what a small Android heap pays for
-    val fBuf = arrayOf(DoubleArray(n), DoubleArray(n)); val pm = DoubleArray(n); val warped = DoubleArray(n)
+    val fBuf = arrayOf(DoubleArray(n), DoubleArray(n)); val pm = DoubleArray(n)
     val vx = Grid(h, w); val vy = Grid(h, w)
     return Array(nLead) { k ->
         var eps: DoubleArray? = null
@@ -454,13 +452,18 @@ internal fun member(s: StepsSetup, mo: Motion, m: Int, nLead: Int, seed: Long, k
         val gPar = P_PAR[0] * t.pow(P_PAR[1]) + P_PAR[2]
         val gPerp = P_PERP[0] * t.pow(P_PERP[1]) + P_PERP[2]
         par.run(n) { from, until -> for (i in from until until) {
-            vx.v[i] = mo.vx.v[i] + (gPar * epsPar * parX[i] + gPerp * epsPerp * -parY[i]) / vsf
-            vy.v[i] = mo.vy.v[i] + (gPar * epsPar * parY[i] + gPerp * epsPerp * parX[i]) / vsf
+            // the unit vectors along the motion, recomputed rather than held: two fields less per member
+            val a = mo.vx.v[i]; val b = mo.vy.v[i]; val nn = sqrt(a * a + b * b)
+            val parX = if (nn > 1e-12) a / nn else 0.0; val parY = if (nn > 1e-12) b / nn else 0.0
+            vx.v[i] = a + (gPar * epsPar * parX + gPerp * epsPerp * -parY) / vsf
+            vy.v[i] = b + (gPar * epsPar * parY + gPerp * epsPerp * parX) / vsf
         } }
         slStep(dx, dy, vx, vy, par)
         if (eps != null) onFirst?.invoke(eps, pm.copyOf())
-        warp(Grid(h, w, pm), dx, dy, out = warped, par = par)
-        FloatArray(n).also { o -> par.run(n) { from, until -> for (i in from until until) o[i] = fromDbSteps(warped[i]) } }
+        val pg = Grid(h, w, pm)
+        // warp's NaN outval straight to mm/h, without a double field in between
+        FloatArray(n).also { o -> par.run(n) { from, until -> for (i in from until until)
+            o[i] = fromDbSteps(sampleOrNaN(pg, (i / w) + dy[i], (i % w) + dx[i])) } }
     }
 }
 
