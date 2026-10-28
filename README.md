@@ -3,9 +3,9 @@
 Minute-by-minute rain for the next hour, worked out on your phone from live European radar.
 
 <p>
-<img src="play/screenshots/1-now.png" width="200" alt="Now screen">
-<img src="play/screenshots/3-map.png" width="200" alt="Rain map">
-<img src="play/screenshots/4-map-place.png" width="200" alt="A tapped place's forecast">
+<img src="fastlane/metadata/android/en-US/images/phoneScreenshots/1-now.png" width="200" alt="Now screen">
+<img src="fastlane/metadata/android/en-US/images/phoneScreenshots/3-map.png" width="200" alt="Rain map">
+<img src="fastlane/metadata/android/en-US/images/phoneScreenshots/4-map-place.png" width="200" alt="A tapped place's forecast">
 </p>
 
 Every five minutes the app takes the last hour of EUMETNET OPERA radar, estimates how the rain moves and grows, and runs it an hour ahead as a 10-member STEPS-style ensemble, nudged by a SmaAt-UNet neural network (ONNX). Everything runs on the device: no account, no server, no tracking.
