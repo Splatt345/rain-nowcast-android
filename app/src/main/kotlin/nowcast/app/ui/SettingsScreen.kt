@@ -77,6 +77,7 @@ private fun Main(repo: Repo, openRegions: () -> Unit, openGuide: () -> Unit, mod
     val list by repo.regionStore.regions.collectAsState()
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
+    var licences by remember { mutableStateOf(false) }
     var editKey by remember { mutableStateOf<String?>(null) }      // the source whose key is being edited
     var locating by remember { mutableStateOf<String?>(null) }
 
@@ -105,7 +106,7 @@ private fun Main(repo: Repo, openRegions: () -> Unit, openGuide: () -> Unit, mod
         // Play's prominent disclosure: what is collected, that it happens when closed, why, and who gets it
         text = { Text("Rain Nowcast collects your location to update widgets and rain alerts for where you are, " +
             "even when the app is closed or not in use. It reads one fix per refresh (every 15 minutes) and keeps no history. " +
-            "To fetch the forecast, an area around you is sent to MeteoGate (radar) and your coordinates to Open-Meteo. " +
+            "The radar for the area around you is downloaded from MeteoGate, and your coordinates go to Open-Meteo for the forecast. " +
             "Android will ask you to allow location \"All the time\".") },
         confirmButton = { TextButton({ whyBackground = false
             if (Build.VERSION.SDK_INT >= 29) bgPermission.launch(Manifest.permission.ACCESS_BACKGROUND_LOCATION) }) { Text("Continue") } },
@@ -239,6 +240,16 @@ private fun Main(repo: Repo, openRegions: () -> Unit, openGuide: () -> Unit, mod
             ": Open-Meteo (weather data by Open-Meteo.com, CC BY 4.0) · Map: OpenFreeMap © OpenMapTiles, data © OpenStreetMap contributors",
             style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(start = 4.dp, top = 20.dp))
+        TextButton({ licences = true }, Modifier.heightIn(min = 48.dp)) {
+            Text("Open-source licences · version ${nowcast.app.BuildConfig.VERSION_NAME}")
+        }
+    }
+
+    if (licences) {
+        val text = remember { runCatching { ctx.assets.open("licenses.txt").bufferedReader().readText() }.getOrDefault("") }
+        AlertDialog({ licences = false }, confirmButton = { TextButton({ licences = false }) { Text("Close") } },
+            title = { Text("Open-source licences") },
+            text = { Text(text, Modifier.verticalScroll(rememberScrollState()), style = MaterialTheme.typography.bodySmall) })
     }
 
     editKey?.let { src ->
