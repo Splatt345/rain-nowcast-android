@@ -1,9 +1,12 @@
 package nowcast.app.widget
 
-import nowcast.app.*
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
-import nowcast.engine.*
+import nowcast.app.data.*
+import nowcast.app.ui.now.*
+import nowcast.engine.forecast.*
+import nowcast.engine.outlook.*
+import nowcast.engine.render.*
 import java.io.File
 import java.time.Duration
 import java.time.Instant
@@ -40,7 +43,7 @@ data class Snapshot(
     /** The engine's sentence, re-worded for the minutes that passed since the radar frame. */
     fun summary(now: Instant): String =
         if (minutes.isEmpty()) "No forecast yet · open the app"
-        else nowcast.engine.summary(minutes.toIntArray(), DoubleArray(mean.size) { mean[it].toDouble() },
+        else nowcast.engine.forecast.summary(minutes.toIntArray(), DoubleArray(mean.size) { mean[it].toDouble() },
             DoubleArray(prob.size) { prob[it].toDouble() }, age(now))
 
     /** Highest chance from now to the end of the series; null once the series is all in the past. */

@@ -3,7 +3,9 @@ package nowcast.app
 import android.util.Log
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
-import nowcast.engine.*
+import nowcast.engine.forecast.*
+import nowcast.engine.math.*
+import nowcast.engine.radar.*
 import org.junit.Assert.*
 import org.junit.Test
 import org.junit.runner.RunWith

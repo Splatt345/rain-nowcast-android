@@ -1,6 +1,5 @@
 package nowcast.app.widget
 
-import nowcast.app.*
 import android.annotation.SuppressLint
 import android.appwidget.AppWidgetManager
 import android.content.Context
@@ -44,8 +43,9 @@ import androidx.glance.state.PreferencesGlanceStateDefinition
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import nowcast.app.ui.NowcastTheme
-import nowcast.app.ui.Overline
+import nowcast.app.*
+import nowcast.app.ui.*
+import nowcast.app.ui.settings.*
 
 /** Opened when a widget is added and, on Android 12+, from "Reconfigure". Saves into that widget's Glance state. */
 class WidgetConfigActivity : ComponentActivity() {

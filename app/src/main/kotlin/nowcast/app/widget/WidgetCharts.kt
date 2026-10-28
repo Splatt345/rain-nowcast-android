@@ -1,6 +1,5 @@
 package nowcast.app.widget
 
-import nowcast.app.*
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
@@ -8,8 +7,9 @@ import android.graphics.DashPathEffect
 import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.RectF
-import nowcast.engine.OutlookBars
-import nowcast.engine.Render
+import nowcast.app.ui.now.*
+import nowcast.engine.outlook.*
+import nowcast.engine.render.*
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter

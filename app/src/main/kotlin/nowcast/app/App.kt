@@ -1,6 +1,8 @@
 package nowcast.app
 
 import android.app.Application
+import nowcast.app.background.*
+import nowcast.app.data.*
 import org.maplibre.android.MapLibre
 
 class App : Application() {

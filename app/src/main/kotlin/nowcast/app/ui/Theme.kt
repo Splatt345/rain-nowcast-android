@@ -2,21 +2,16 @@ package nowcast.app.ui
 
 import android.content.Context
 import android.os.Build
-import androidx.core.graphics.ColorUtils
-import androidx.compose.foundation.isSystemInDarkTheme
-import androidx.compose.material3.*
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
-import nowcast.app.App
-import nowcast.app.AppColors
-import nowcast.app.DarkMode
-import nowcast.app.Settings
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
@@ -24,6 +19,9 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
+import androidx.core.graphics.ColorUtils
+import nowcast.app.*
+import nowcast.app.data.*
 
 // Fallback palette (no dynamic colour): storm blue, wet-slate surfaces, a teal for "clearing".
 internal val AppLight = lightColorScheme(

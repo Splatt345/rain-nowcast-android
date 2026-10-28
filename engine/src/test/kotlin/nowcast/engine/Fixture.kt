@@ -1,6 +1,7 @@
 package nowcast.engine
 
 import kotlinx.serialization.json.*
+import nowcast.engine.math.*
 
 object Fixture : FixtureFile("/lite_fixture.json")
 object StepsFixture : FixtureFile("/stepsport_fixture.json")

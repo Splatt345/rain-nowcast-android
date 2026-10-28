@@ -1,6 +1,6 @@
 package nowcast.app.widget
 
-import nowcast.app.*
+import nowcast.engine.outlook.*
 import org.junit.Assert.*
 import org.junit.Rule
 import org.junit.Test
@@ -26,8 +26,8 @@ class SnapshotTest {
     @Test fun openMeteoSnapshotHasNoRadarAndSaysWhereItIsFrom() {
         val now = Instant.parse("2026-10-28T12:07:00Z")
         val t = (0..9).map { "\"2026-10-28T%02d:%02d\"".format(11 + it * 15 / 60, it * 15 % 60) }.joinToString(",")
-        val h = nowcast.engine.OpenMeteo.parse("""{"minutely_15":{"time":[$t],"precipitation_icon_d2":[0,0,0,0,0,0,0.5,1,0,0]}}""", "minutely_15")
-        val (p, issued) = nowcast.engine.OpenMeteoNowcast.point(h, now)
+        val h = OpenMeteo.parse("""{"minutely_15":{"time":[$t],"precipitation_icon_d2":[0,0,0,0,0,0,0.5,1,0,0]}}""", "minutely_15")
+        val (p, issued) = OpenMeteoNowcast.point(h, now)
         val s = Snapshot.decode(Snapshot.encode(Snapshot.ofPoint(p, issued, emptyList(), full = true, now = now)))!!
         assertNull(s.radar); assertEquals(Snapshot.SOURCE_OPEN_METEO, s.source)
         assertEquals(7, s.age(now)); assertEquals(100, s.chance(now))

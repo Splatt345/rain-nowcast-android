@@ -52,11 +52,22 @@ Needs JDK 17 and the Android SDK (compileSdk 36).
 
 | Path | What |
 |---|---|
-| `engine/` | Pure Kotlin/JVM: radar reading (ODIM HDF5), optical flow, the STEPS ensemble, FFT, the ONNX models, point forecasts, rendering. Unit-tested against the Python reference |
-| `app/` | The Android app: Compose UI, MapLibre map, WorkManager refresh, Glance widgets |
+| `engine/` | Pure Kotlin/JVM, no Android; unit-tested against the Python reference |
+| `engine/…/radar/` | OPERA radar: download, ranged HDF5 reads, crops, the map projection, regions |
+| `engine/…/forecast/` | The nowcast: optical flow, the STEPS ensemble, the ONNX model, point forecasts, input checks |
+| `engine/…/outlook/` | Open-Meteo: the 48-hour outlook and the no-radar nowcast |
+| `engine/…/render/` | Rain to map and widget bitmaps |
+| `engine/…/math/` | FFT, grids, random numbers |
+| `app/` | The Android app: `App` and `MainActivity` at the top |
+| `app/…/data/` | State and storage: the repository, settings, keys, caches, location, the forecast cycle |
+| `app/…/background/` | WorkManager refresh and rain alerts |
+| `app/…/ui/` | Compose screens: `now/`, `map/`, `settings/`, plus the theme and first run |
+| `app/…/widget/` | Glance home-screen widgets and their configuration |
 | `screenshots/` | Widget screenshots for this README |
 | `fastlane/` | Store metadata in the layout F-Droid reads |
-| `fdroid/` | Draft F-Droid build metadata |
+| `fdroid/` | F-Droid build metadata |
+
+Tests mirror the same folders.
 
 ## Data
 

@@ -1,9 +1,9 @@
 package nowcast.app
 
 import android.Manifest
-import android.os.Build
 import android.content.Context
 import android.content.Intent
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -36,7 +36,11 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.repeatOnLifecycle
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import nowcast.app.data.*
 import nowcast.app.ui.*
+import nowcast.app.ui.map.*
+import nowcast.app.ui.now.*
+import nowcast.app.ui.settings.*
 import java.time.Instant
 
 enum class Tab { NOW, MAP, SETTINGS }
