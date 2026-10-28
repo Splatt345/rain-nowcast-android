@@ -5,6 +5,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -270,9 +271,10 @@ class Repo(private val ctx: Context) {
     private fun model(region: Region): SmaatModel? {
         if (modelBroken != null) return null
         val name = if (modelStore.isKnown(region.model)) region.model else ModelStore.BUNDLED
-        smaat?.let { if (it.first == name) return it.second; it.second.close() }
+        val key = "$name@${modelStore.stamp(name)}"      // a re-imported model of the same name is a new one
+        smaat?.let { if (it.first == key) return it.second; it.second.close() }
         return try {
-            SmaatModel(modelStore.bytes(name)).also { smaat = name to it }
+            SmaatModel(modelStore.bytes(name)).also { smaat = key to it }
         } catch (e: Exception) {
             modelBroken = e.message ?: e::class.simpleName; null
         }
@@ -298,12 +300,17 @@ class Repo(private val ctx: Context) {
         scope.launch { refresh(force = true, at = at) }
     }
 
-    /** Point for a map tap; another region's forecast is fetched first. */
-    suspend fun pointAt(lat: Double, lon: Double): PointForecast? {
+    /**
+     * Point for a map tap and the time its minutes count from; another region's forecast is fetched first,
+     * in the Repo's scope, so closing the sheet does not cancel a run that has already dropped the old one.
+     */
+    suspend fun pointAt(lat: Double, lon: Double): Pair<PointForecast, Instant>? {
         val fc = flow.value.forecast
-        if (fc == null || !fc.region.contains(lat, lon)) refresh(at = lat to lon)
+        if (fc == null || !fc.region.contains(lat, lon)) scope.async { refresh(at = lat to lon) }.await()
         val now = flow.value.forecast ?: return null
-        return withContext(Dispatchers.Default) { now.point(lat, lon) }
+        // the region's run failed: the old forecast's nearest edge would pass for an answer
+        if (!now.region.contains(lat, lon) && flow.value.problem.let { it is Problem.Network || it is Problem.Radar }) return null
+        return withContext(Dispatchers.Default) { now.point(lat, lon) } to now.issued
     }
 
     /** Following: home is where the phone is, checked before every cycle. Without a fix, home stays put. */
@@ -320,7 +327,7 @@ class Repo(private val ctx: Context) {
         val fc = flow.value.forecast
         if (fc != null && fc.region.contains(lat, lon) && !openMeteo)
             flow.update { it.copy(point = fc.point(lat, lon), issued = fc.issued) }
-        refresh()
+        scope.launch { refresh() }        // not the caller's scope: leaving the map must not cancel the run
     }
 
     /** Snapshot for the widgets from either run, then re-render them all, so their age stays true even when a run failed. */

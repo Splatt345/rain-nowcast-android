@@ -38,6 +38,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import nowcast.app.ModelStore
 import nowcast.app.NowcastSource
+import nowcast.app.Problem
 import nowcast.app.Repo
 import nowcast.app.UiState
 import nowcast.engine.PointForecast
@@ -103,7 +104,9 @@ fun MapScreen(repo: Repo, state: UiState, now: Instant) {
     var minute by rememberSaveable { mutableIntStateOf(-1) }
     var playing by remember { mutableStateOf(false) }
     var sheet by remember { mutableStateOf<LatLng?>(null) }
-    var sheetPoint by remember { mutableStateOf<PointForecast?>(null) }
+    /** The tapped point and the time its minutes count from; [sheetFailed] when the look-up gave nothing. */
+    var sheetPoint by remember { mutableStateOf<Pair<PointForecast, Instant>?>(null) }
+    var sheetFailed by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
     LaunchedEffect(frames) {
@@ -115,19 +118,26 @@ fun MapScreen(repo: Repo, state: UiState, now: Instant) {
         while (playing) { delay(100); minute = (minute + 1) % (f.minutes + 1) }          // a minute at a time
     }
 
-    LaunchedEffect(mapView, dark) {
+    LaunchedEffect(mapView) {
         mapView.getMapAsync { m ->
             map = m
             m.uiSettings.isRotateGesturesEnabled = false; m.uiSettings.isTiltGesturesEnabled = false
             m.uiSettings.isLogoEnabled = false
             m.uiSettings.isAttributionEnabled = false    // shown as text on the map instead
-            m.setStyle(mapStyle(dark)) { st -> style = st }
             m.addOnMapClickListener { ll ->
-                sheet = ll; sheetPoint = null
-                scope.launch { sheetPoint = repo.pointAt(ll.latitude, ll.longitude) }
+                sheet = ll; sheetPoint = null; sheetFailed = false
+                scope.launch {
+                    val p = repo.pointAt(ll.latitude, ll.longitude)
+                    if (sheet == ll) { sheetPoint = p; sheetFailed = p == null }     // a later tap wins
+                }
                 true
             }
         }
+    }
+    LaunchedEffect(map, dark) {
+        val m = map ?: return@LaunchedEffect
+        style = null                                 // the old one is invalid once the new one loads
+        m.setStyle(mapStyle(dark)) { st -> style = st }
     }
     // camera: frame the region once per region
     val regionId = frames?.regionId
@@ -234,9 +244,13 @@ fun MapScreen(repo: Repo, state: UiState, now: Instant) {
                 verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Text("%.3f, %.3f".format(java.util.Locale.ROOT, ll.latitude, ll.longitude), style = Overline,
                     color = MaterialTheme.colorScheme.primary)
-                val p = sheetPoint
-                val iss = state.forecast?.issued
-                if (p == null || iss == null) {
+                val (p, iss) = sheetPoint ?: (null to null)
+                if (sheetFailed) {
+                    Text((state.problem as? Problem.Network)?.let { "No forecast here: ${it.msg}" }
+                        ?: (state.problem as? Problem.Radar)?.let { "No forecast here: ${it.msg}" }
+                        ?: if (!repo.hasKey) "The radar forecast for a place needs a MeteoGate key (Settings)." else "No forecast here right now.",
+                        style = MaterialTheme.typography.bodyLarge)
+                } else if (p == null || iss == null) {
                     Shimmer(Modifier.fillMaxWidth().height(30.dp)); Shimmer(Modifier.fillMaxWidth().height(220.dp))
                 } else {
                     Text(p.summary, style = MaterialTheme.typography.headlineSmall)

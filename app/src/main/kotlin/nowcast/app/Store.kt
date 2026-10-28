@@ -25,7 +25,8 @@ class Prefs(ctx: Context) {
     val settings: StateFlow<Settings> = flow
     val value: Settings get() = flow.value
 
-    fun update(f: (Settings) -> Settings) {
+    /** Synchronized: the screens and the cycle's coroutines both update, and a lost update is a lost setting. */
+    @Synchronized fun update(f: (Settings) -> Settings) {
         val s = f(flow.value)
         sp.edit().clear().apply { s.toMap().forEach { (k, v) -> putString(k, v) } }.apply()
         flow.value = s
@@ -103,6 +104,9 @@ class ModelStore(private val ctx: Context) {
     }
 
     fun isKnown(name: String) = name == BUNDLED || File(dir, name).exists()
+
+    /** Changes when a model of that name is imported again. */
+    fun stamp(name: String) = if (name == BUNDLED) 0L else File(dir, name).lastModified()
 
     /** Copy, validate with a forward pass, keep only if it passes. Returns the stored name. */
     fun import(uri: Uri): String {
