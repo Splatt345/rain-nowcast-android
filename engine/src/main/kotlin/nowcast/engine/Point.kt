@@ -13,23 +13,44 @@ class PointForecast(
 
 /** Twin of rain-nowcast/nowcast/interpolate.py:point_series. motion is px per frame step. */
 fun pointSeries(frames: List<FloatArray>, h: Int, w: Int, motion: Motion?, row: Int, col: Int,
-                subSteps: Int, box: Int = 1): DoubleArray {
-    val grids = frames.map { f -> Grid(h, w, DoubleArray(f.size) { f[it].toDouble() }) }
-    val offs = (-box..box).flatMap { dr -> (-box..box).map { dc -> dr to dc } }
-    val rows = offs.map { (row + it.first).toDouble() }; val cols = offs.map { (col + it.second).toDouble() }
-    val vx = rows.indices.map { if (motion == null) 0.0 else sampleClamped(motion.vx, rows[it], cols[it]) }
-    val vy = rows.indices.map { if (motion == null) 0.0 else sampleClamped(motion.vy, rows[it], cols[it]) }
-    val out = ArrayList<Double>()
-    for (k in 0 until grids.size - 1) for (s in 0 until subSteps) {
-        val d = s.toDouble() / subSteps
-        out += rows.indices.map { j ->
-            val back = sampleClamped(grids[k], rows[j] - vy[j] * d, cols[j] - vx[j] * d)
-            val fwd = sampleClamped(grids[k + 1], rows[j] + vy[j] * (1 - d), cols[j] + vx[j] * (1 - d))
-            (1 - d) * back + d * fwd
-        }.average()
+                subSteps: Int, box: Int = 1): DoubleArray =
+    pointSeries(frames.size, h, w, motion, row, col, subSteps, box) { k, i -> frames[k][i].toDouble() }
+
+/** Pixel i of frame k; a fun interface, so no boxing. */
+internal fun interface Pixels { fun at(k: Int, i: Int): Double }
+
+/** pointSeries reading frame k's pixel i through [at]: it samples a few pixels per step, so
+ *  copying every frame to a Grid first cost ~25 MB per curve. Same arithmetic as sampleClamped. */
+internal fun pointSeries(nFrames: Int, h: Int, w: Int, motion: Motion?, row: Int, col: Int,
+                         subSteps: Int, box: Int, at: Pixels): DoubleArray {
+    val side = 2 * box + 1; val nb = side * side
+    val rows = DoubleArray(nb) { (row + it / side - box).toDouble() }; val cols = DoubleArray(nb) { (col + it % side - box).toDouble() }
+    val vx = DoubleArray(nb) { if (motion == null) 0.0 else sampleClamped(motion.vx, rows[it], cols[it]) }
+    val vy = DoubleArray(nb) { if (motion == null) 0.0 else sampleClamped(motion.vy, rows[it], cols[it]) }
+    fun samp(k: Int, r: Double, c: Double): Double {
+        var out = 0.0
+        clampedCell(h, w, r, c) { i00, i01, i10, i11, fr, fc ->
+            val a = at.at(k, i00).let { if (it.isNaN()) 0.0 else it }; val b = at.at(k, i01).let { if (it.isNaN()) 0.0 else it }
+            val cc = at.at(k, i10).let { if (it.isNaN()) 0.0 else it }; val d = at.at(k, i11).let { if (it.isNaN()) 0.0 else it }
+            out = (1 - fr) * ((1 - fc) * a + fc * b) + fr * ((1 - fc) * cc + fc * d)
+        }
+        return out
     }
-    out += rows.indices.map { sampleClamped(grids.last(), rows[it], cols[it]) }.average()
-    return out.toDoubleArray()
+    val out = DoubleArray((nFrames - 1) * subSteps + 1); var o = 0
+    for (k in 0 until nFrames - 1) for (s in 0 until subSteps) {
+        val d = s.toDouble() / subSteps
+        var sum = 0.0
+        for (j in 0 until nb) {
+            val back = samp(k, rows[j] - vy[j] * d, cols[j] - vx[j] * d)
+            val fwd = samp(k + 1, rows[j] + vy[j] * (1 - d), cols[j] + vx[j] * (1 - d))
+            sum += (1 - d) * back + d * fwd
+        }
+        out[o++] = sum / nb
+    }
+    var sum = 0.0
+    for (j in 0 until nb) sum += samp(nFrames - 1, rows[j], cols[j])
+    out[o] = sum / nb
+    return out
 }
 
 /** numpy.percentile, default "linear" method. */

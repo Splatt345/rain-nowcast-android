@@ -20,11 +20,14 @@ class Forecast(
         val (r0, c0) = geo.rowCol(lat, lon)
         val inCoverage = r0 in 0 until h && c0 in 0 until w
         val row = r0.coerceIn(0, h - 1); val col = c0.coerceIn(0, w - 1)
-        val pastF = past.map { f -> FloatArray(h * w) { f.rain.v[it].toFloat() } }
         val first = -intervalMinutes * (past.size - 1); val last = intervalMinutes * mean.size
         val minutes = IntArray(last - first + 1) { first + it }
-        val series = pointSeries(pastF + mean.toList(), h, w, motion, row, col, intervalMinutes)
-        val curves = members.map { m -> pointSeries(pastF + m.toList(), h, w, motion, row, col, intervalMinutes) }
+        val np = past.size
+        // past frames as the float32 they are in the members' frame list, without copying them
+        fun curve(fut: Array<FloatArray>) = pointSeries(np + fut.size, h, w, motion, row, col, intervalMinutes, 1) { k, i ->
+            if (k < np) past[k].rain.v[i].toFloat().toDouble() else fut[k - np][i].toDouble() }
+        val series = curve(mean)
+        val curves = members.map(::curve)
         val prob = DoubleArray(minutes.size) { t -> curves.count { it[t] >= RAIN_THRESHOLD }.toDouble() / curves.size }
         fun band(q: Double, lower: Boolean) = DoubleArray(minutes.size) { t ->
             val p = percentile(DoubleArray(curves.size) { curves[it][t] }, q)
