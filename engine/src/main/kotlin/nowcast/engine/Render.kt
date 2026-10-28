@@ -147,7 +147,29 @@ object Render {
     }
 
     /** Motion on a coarse grid over a Mercator raster, in raster pixels per frame step: the card's state.motion. */
-    class RasterMotion(val w: Int, val h: Int, val step: Int, val dx: FloatArray, val dy: FloatArray)
+    class RasterMotion(val w: Int, val h: Int, val step: Int, val dx: FloatArray, val dy: FloatArray) {
+        /** Per raster pixel (vx, vy), interpolated once: half of [warp]'s work, the same every minute.
+         *  Doubles, as warp computed them (3.8 MB for Belgium's 512 px raster, made when the map first plays). */
+        private class Pixels(val w: Int, val h: Int, val vx: DoubleArray, val vy: DoubleArray)
+        @Volatile private var pixels: Pixels? = null
+
+        internal fun pixels(w: Int, h: Int): Pair<DoubleArray, DoubleArray> {
+            pixels?.let { if (it.w == w && it.h == h) return it.vx to it.vy }
+            val vx = DoubleArray(w * h); val vy = DoubleArray(w * h); val mw = this.w
+            for (y in 0 until h) {
+                val fy = y.toDouble() / step; val y0 = minOf(fy.toInt(), this.h - 2); val ty = fy - y0
+                for (x in 0 until w) {
+                    val fx = x.toDouble() / step; val x0 = minOf(fx.toInt(), mw - 2); val tx = fx - x0
+                    val i = y0 * mw + x0
+                    val w00 = (1 - tx) * (1 - ty); val w10 = tx * (1 - ty); val w01 = (1 - tx) * ty; val w11 = tx * ty
+                    vx[y * w + x] = dx[i] * w00 + dx[i + 1] * w10 + dx[i + mw] * w01 + dx[i + mw + 1] * w11
+                    vy[y * w + x] = dy[i] * w00 + dy[i + 1] * w10 + dy[i + mw] * w01 + dy[i + mw + 1] * w11
+                }
+            }
+            pixels = Pixels(w, h, vx, vy)
+            return vx to vy
+        }
+    }
 
     /**
      * [m] (source pixels per frame step) carried onto the raster [s] samples: at each coarse node the
@@ -186,15 +208,10 @@ object Render {
             fun v(r: Int, c: Int) = (src[r * w + c].toInt() and 255).toDouble()
             return v(yi, xi) * (1 - tx) * (1 - ty) + v(yi, x1) * tx * (1 - ty) + v(y1, xi) * (1 - tx) * ty + v(y1, x1) * tx * ty
         }
-        val out = ByteArray(w * h); val mw = m.w
+        val out = ByteArray(w * h); val (pvx, pvy) = m.pixels(w, h)
         for (y in 0 until h) {
-            val fy = y.toDouble() / m.step; val y0 = minOf(fy.toInt(), m.h - 2); val ty = fy - y0
             for (x in 0 until w) {
-                val fx = x.toDouble() / m.step; val x0 = minOf(fx.toInt(), mw - 2); val tx = fx - x0
-                val i = y0 * mw + x0
-                val w00 = (1 - tx) * (1 - ty); val w10 = tx * (1 - ty); val w01 = (1 - tx) * ty; val w11 = tx * ty
-                val vx = m.dx[i] * w00 + m.dx[i + 1] * w10 + m.dx[i + mw] * w01 + m.dx[i + mw + 1] * w11
-                val vy = m.dy[i] * w00 + m.dy[i + 1] * w10 + m.dy[i + mw] * w01 + m.dy[i + mw + 1] * w11
+                val vx = pvx[y * w + x]; val vy = pvy[y * w + x]
                 val back = samp(a, x - vx * d, y - vy * d)
                 val fwd = samp(b, x + vx * (1 - d), y + vy * (1 - d))
                 out[y * w + x] = ((1 - d) * back + d * fwd + 0.5).toInt().toByte()
