@@ -298,6 +298,11 @@ private fun Summary(w: W, cls: SizeClass) {
             Spacer(GlanceModifier.defaultWeight())
             Text("+60 min", style = TextStyle(color = GlanceTheme.colors.onSurfaceVariant, fontSize = 11.sp))
         }
+        if (big) {
+            Spacer(GlanceModifier.height(18.dp))
+            Text("Next 12 h", style = TextStyle(color = GlanceTheme.colors.onSurfaceVariant, fontSize = 11.sp))
+            HourChart(w, 12, 64f)
+        }
     }
 }
 
@@ -351,13 +356,16 @@ private fun Radar(w: W, cls: SizeClass) {
     val t = HM.format(Instant.ofEpochSecond(w.s.issued + 60L * f.lead).atZone(ZoneId.systemDefault()))
     val what = if (f.lead == 0) "Radar $t" else "Forecast $t (+${f.lead} min)"
     if (cls == SizeClass.LARGE) {
-        Column(GlanceModifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
+        Column(GlanceModifier.fillMaxSize()) {
             Header(w, 20)
             Sentence(w, sp = 13, lines = 2)
             Spacer(GlanceModifier.height(6.dp))
-            RadarMap(w, r, f, min(w.iw, w.ih - 28 - 36 - 6 - 20), what)
+            Row(GlanceModifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
+                RadarMap(w, r, f, min(w.iw, w.ih - 28 - 36 - 6 - 20), what)
+            }
             Spacer(GlanceModifier.height(4.dp))
-            Text(what, style = TextStyle(color = GlanceTheme.colors.onSurfaceVariant, fontSize = 12.sp))
+            Text(what, modifier = GlanceModifier.fillMaxWidth(),
+                style = TextStyle(color = GlanceTheme.colors.onSurfaceVariant, fontSize = 12.sp, textAlign = androidx.glance.text.TextAlign.Center))
         }
         return
     }

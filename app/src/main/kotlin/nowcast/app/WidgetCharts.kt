@@ -64,7 +64,7 @@ object WidgetCharts {
         val yMax = niceCeil(maxOf(1.0, top * 1.15))
         val left = if (axes) m.dp(if (units == RainUnits.WORDS) 46f else 26f) else m.dp(2f)
         val right = m.w - m.dp(4f)
-        val y0 = if (axes) m.dp(8f) else m.dp(3f)
+        val y0 = if (axes) m.dp(13f) else m.dp(3f)
         val bottom = m.h - if (axes) m.dp(15f) else m.dp(2f)
         fun x(min: Int) = left + (min + 30) / 90f * (right - left)
         fun y(v: Double) = bottom - (v / yMax).toFloat().coerceIn(0f, 1.04f) * (bottom - y0)
@@ -79,7 +79,7 @@ object WidgetCharts {
             else listOf(yMax / 2 to fmt(yMax / 2), yMax to "${fmt(yMax)} mm/h")
             for ((v, t) in ticks) {
                 muted.drawLine(left, y(v), right, y(v), grid)
-                muted.drawText(t, m.dp(1f), (y(v) + m.dp(3.5f)).coerceAtLeast(m.dp(9f)), label)
+                muted.drawText(t, m.dp(1f), y(v) - m.dp(2.5f), label)     // above its line, never across it
             }
             for (min in listOf(-30, 0, 30, 60)) {
                 val t = if (min == 0) "now" else if (min > 0) "+$min" else "$min"
@@ -116,7 +116,8 @@ object WidgetCharts {
         val by = s.bars.associateBy { it.start }
         val slots = List(n) { by[t0 + 1800L * it] }
         val yMax = maxOf(1.0, slots.filterNotNull().maxOfOrNull { it.mm.toDouble() } ?: 0.0)
-        val y0 = m.dp(13f); val bottom = m.h - m.dp(14f)
+        val days = hDp >= 50f          // a 2×1 has no room for a row of day names
+        val y0 = if (days) m.dp(13f) else m.dp(3f); val bottom = m.h - m.dp(14f)
         val slot = m.w.toFloat() / n
         val bw = (slot * 0.72f).coerceAtLeast(1f)
         val muted = m[Ink.MUTED]; val base = m[Ink.BASE]; val pr = m[Ink.PRIMARY]
@@ -127,7 +128,7 @@ object WidgetCharts {
         slots.forEachIndexed { i, b ->
             val t = java.time.Instant.ofEpochSecond(t0 + 1800L * i).atZone(zone)
             val cx = i * slot + slot / 2
-            if ((i == 0 && t.hour < 20) || (t.hour == 0 && t.minute == 0)) {
+            if (days && ((i == 0 && t.hour < 20) || (t.hour == 0 && t.minute == 0))) {
                 if (i > 0) muted.drawLine(i * slot, m.dp(2f), i * slot, bottom, m.paint(0.5f, 1f))
                 muted.drawText(DAY.format(t), i * slot + if (i > 0) m.dp(3f) else 0f, m.dp(10f), label)
             }
