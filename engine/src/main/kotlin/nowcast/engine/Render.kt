@@ -31,9 +31,13 @@ object Render {
 
     private val LO = log10(MIN_RATE)
     private val HI = log10(MAX_RATE)
+    /** level of anything at or below the 1e-3 floor: most of a map is dry, and log10 is its cost. */
+    private val DRY_LEVEL = levelOf(0.0)
     private fun logRate(i: Int) = LO + (HI - LO) * i / 255.0
 
-    fun level(rate: Double): Int {
+    fun level(rate: Double): Int = if (!(rate > 1e-3) || rate.isInfinite()) DRY_LEVEL else levelOf(rate)
+
+    private fun levelOf(rate: Double): Int {
         val r = if (rate.isFinite()) rate else 0.0
         val unit = ((log10(max(r, 1e-3)) - LO) / (HI - LO)).coerceIn(0.0, 1.0)
         return (Math.rint(unit * (LEVEL_STEPS - 1)) * (255.0 / (LEVEL_STEPS - 1))).toInt()
@@ -102,28 +106,43 @@ object Render {
             while (j < 0 || j >= n) j = if (j < 0) -j - 1 else 2 * n - j - 1
             return j
         }
-        val tmp = Grid(f.h, f.w); val out = Grid(f.h, f.w)
-        for (r in 0 until f.h) for (c in 0 until f.w) {
-            var s = 0.0; for (j in k.indices) s += k[j] * f[r, refl(c + j - rad, f.w)]; tmp[r, c] = s
+        val h = f.h; val w = f.w; val tmp = DoubleArray(h * w); val out = DoubleArray(h * w); val v = f.v
+        // reflection only within rad of an edge; inside, the same sums without it
+        for (r in 0 until h) for (c in 0 until w) {
+            var s = 0.0; val o = r * w + c - rad
+            if (c >= rad && c < w - rad) for (j in k.indices) s += k[j] * v[o + j]
+            else for (j in k.indices) s += k[j] * v[r * w + refl(c + j - rad, w)]
+            tmp[r * w + c] = s
         }
-        for (r in 0 until f.h) for (c in 0 until f.w) {
-            var s = 0.0; for (j in k.indices) s += k[j] * tmp[refl(r + j - rad, f.h), c]; out[r, c] = s
+        for (r in 0 until h) {
+            val inside = r >= rad && r < h - rad
+            for (c in 0 until w) {
+                var s = 0.0
+                if (inside) { val o = (r - rad) * w + c; for (j in k.indices) s += k[j] * tmp[o + j * w] }
+                else for (j in k.indices) s += k[j] * tmp[refl(r + j - rad, h) * w + c]
+                out[r * w + c] = s
+            }
         }
-        return out
+        return Grid(h, w, out)
     }
 
     /** render.resample: NaN -> 0, display smoothing, bilinear with zeros outside (map_coordinates constant). */
-    fun resample(field: FloatArray, h: Int, w: Int, s: Sampler, smooth: Double = SMOOTH_PX): DoubleArray {
+    fun resample(field: FloatArray, h: Int, w: Int, s: Sampler, smooth: Double = SMOOTH_PX): DoubleArray =
+        DoubleArray(s.rows.size).also { o -> resampleInto(field, h, w, s, smooth) { i, v -> o[i] = v } }
+
+    private fun at(g: Grid, r: Int, c: Int) = if (r in 0 until g.h && c in 0 until g.w) g[r, c] else 0.0
+
+    /** [resample], each value handed to [put] instead of kept: [levels] needs only its byte. */
+    private inline fun resampleInto(field: FloatArray, h: Int, w: Int, s: Sampler, smooth: Double, put: (Int, Double) -> Unit) {
         var g = Grid(h, w, DoubleArray(h * w) { field[it].let { v -> if (v.isNaN()) 0.0 else v.toDouble() } })
         if (smooth > 0) g = gaussian(g, smooth)
-        fun at(r: Int, c: Int) = if (r in 0 until h && c in 0 until w) g[r, c] else 0.0
-        return DoubleArray(s.rows.size) { i ->
+        for (i in s.rows.indices) {
             val r = s.rows[i]; val c = s.cols[i]
-            if (r.isNaN() || c.isNaN() || r <= -1 || c <= -1 || r >= h || c >= w) 0.0 else {
+            put(i, if (r.isNaN() || c.isNaN() || r <= -1 || c <= -1 || r >= h || c >= w) 0.0 else {
                 val r0 = floor(r).toInt(); val c0 = floor(c).toInt(); val fr = r - r0; val fc = c - c0
-                (1 - fr) * ((1 - fc) * at(r0, c0) + fc * at(r0, c0 + 1)) +
-                    fr * ((1 - fc) * at(r0 + 1, c0) + fc * at(r0 + 1, c0 + 1))
-            }
+                (1 - fr) * ((1 - fc) * at(g, r0, c0) + fc * at(g, r0, c0 + 1)) +
+                    fr * ((1 - fc) * at(g, r0 + 1, c0) + fc * at(g, r0 + 1, c0 + 1))
+            })
         }
     }
 
@@ -185,7 +204,7 @@ object Render {
     }
 
     fun levels(field: FloatArray, h: Int, w: Int, s: Sampler): ByteArray =
-        resample(field, h, w, s).let { v -> ByteArray(v.size) { level(v[it]).toByte() } }
+        ByteArray(s.rows.size).also { o -> resampleInto(field, h, w, s, SMOOTH_PX) { i, v -> o[i] = level(v).toByte() } }
 
     private val alpha = alphaLut()
 

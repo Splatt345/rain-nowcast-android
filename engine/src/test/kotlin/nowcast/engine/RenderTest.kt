@@ -12,6 +12,9 @@ class RenderTest {
     @Test fun levelsMatchPython() = assertEquals(listOf(0, 0, 24, 105, 182, 255, 60, 133),
         listOf(0.0, 0.02, 0.1, 1.0, 10.0, 100.0, 0.3, 2.5).map(Render::level))
 
+    @Test fun levelEdges() = assertEquals(listOf(0, 0, 0, 0, 0, 0, 0, 255),
+        listOf(Double.NaN, Double.POSITIVE_INFINITY, Double.NEGATIVE_INFINITY, -1.0, 1e-3, 0.03, 0.05, 1e9).map(Render::level))
+
     @Test fun alphaMatchesPython() = assertEquals(listOf(0, 3, 34, 69, 138, 215, 215, 215, 215),
         listOf(0, 1, 10, 20, 40, 63, 64, 128, 255).map { Render.alphaLut()[it] })
 
