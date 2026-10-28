@@ -86,7 +86,7 @@ class Repo(private val ctx: Context) {
                 else RadarSource(key, File(ctx.cacheDir, "radar")).run { prune(); latestFrames(region) }
             }
             val old = flow.value.forecast
-            val fc = if (!force && old != null && old.region == region && old.issued == frames.last().time) old
+            val fc = if (old != null && Cycle.skip(frames.last().time, old.issued, old.region == region, force)) old
             else withContext(Dispatchers.Default) { Nowcaster(if (s.useModel) model(region) else null).run(region, frames) }
             if (fc.modelError != null && modelBroken == null) modelBroken = fc.modelError
             val note = when {
@@ -113,7 +113,43 @@ class Repo(private val ctx: Context) {
             flow.update { it.copy(loading = false) }
         }
         refreshOutlook(s)
-        writeSnapshot()
+        val st = flow.value
+        publish(st.forecast, st.point, full = true)
+    }
+
+    /**
+     * Background: the point path on a [Cycle.BOX_KM] box around home, ~1 s instead of a full region run.
+     * Feeds the widgets and the alert, not the screens (their graph is tied to the full forecast's issue
+     * time). Returns the home point and its issue time; null when there was nothing new or it failed.
+     */
+    suspend fun refreshPoint(force: Boolean = false): Pair<PointForecast, Instant>? = lock.withLock {
+        val s = prefs.value
+        val key = secrets.get(SOURCE_OPERA)
+        if (key == null && !demo) return@withLock null
+        val home = s.home; val (lat, lon) = home
+        val region = regionFor(lat, lon)
+        var result: Pair<PointForecast, Instant>? = null
+        var fc: Forecast? = null
+        try {
+            val frames = withContext(Dispatchers.IO) {
+                if (demo) Demo.frames(ctx, region)
+                else RadarSource(key, File(ctx.cacheDir, "radar")).run { prune(); latestFrames(region, 12, bbox = pointBbox(lat, lon, Cycle.BOX_KM)) }
+            }
+            val last = withContext(Dispatchers.IO) { Snapshot.read(ctx.filesDir) }
+            val lastHome = last?.radar?.let { it.homeLat to it.homeLon }
+            if (!Cycle.skip(frames.last().time, last?.let { Instant.ofEpochSecond(it.issued) }, Cycle.sameHome(home, lastHome), force)) {
+                fc = withContext(Dispatchers.Default) { Cycle.box(Nowcaster(if (s.useModel) model(region) else null), region, frames, lat, lon) }
+                if (fc.modelError != null && modelBroken == null) modelBroken = fc.modelError
+                result = withContext(Dispatchers.Default) { fc.point(lat, lon) } to fc.issued
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            // the widgets show the age of what they have; the next cycle tries again
+        }
+        if (result != null) refreshOutlook(s)
+        publish(fc, result?.first, full = false)
+        result
     }
 
     /** Outlook at home, hourly or when home moved. Never replaced by anything invented on failure. */
@@ -160,14 +196,12 @@ class Repo(private val ctx: Context) {
         refresh()
     }
 
-    /** Snapshot for the widgets, then re-render them all, so their age stays true even when the refresh failed. */
-    private suspend fun writeSnapshot() {
-        val st = flow.value
-        val p = st.point; val fc = st.forecast
+    /** Snapshot for the widgets from either run, then re-render them all, so their age stays true even when a run failed. */
+    private suspend fun publish(fc: Forecast?, p: PointForecast?, full: Boolean) {
         val home = prefs.value.home
         if (p != null && fc != null && fc.region.contains(home.first, home.second)) withContext(Dispatchers.IO) {
             val now = Instant.now()
-            runCatching { Snapshot.of(fc, p, OutlookBars.join(st.outlook, p, fc.issued, now), home, full = true, now).write(ctx.filesDir) }
+            runCatching { Snapshot.of(fc, p, OutlookBars.join(flow.value.outlook, p, fc.issued, now), home, full, now).write(ctx.filesDir) }
         }
         runCatching { Widgets.updateAll(ctx) }
     }

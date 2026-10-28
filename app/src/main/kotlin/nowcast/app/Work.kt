@@ -14,18 +14,17 @@ import androidx.work.*
 import java.time.Instant
 import java.util.concurrent.TimeUnit
 
-/** WorkManager every 15 min: refresh, then maybe "rain in N min". */
+/** WorkManager every 15 min: a point forecast around home for the widgets, then maybe "rain in N min". */
 class RefreshWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ctx, params) {
     override suspend fun doWork(): Result {
         val repo = (applicationContext as App).repo
         if (!repo.hasKey) return Result.success()
-        repo.refresh()
-        val st = repo.state.value
-        val p = st.point; val fc = st.forecast
+        // the full ensemble runs only while the app is visible; here, the cheap point path
+        val (p, issued) = repo.refreshPoint() ?: return Result.success()
         val s = repo.prefs.value
-        if (s.notify && p != null && fc != null && st.problem == null)
+        if (s.notify)
             Notifier.maybeAlert(applicationContext, p.summary,
-                Alerts.minutesToRain(p, fc.issued, Instant.now(), s.notifyLeadMin, s.notifyThreshold))
+                Alerts.minutesToRain(p, issued, Instant.now(), s.notifyLeadMin, s.notifyThreshold))
         return Result.success()
     }
 
