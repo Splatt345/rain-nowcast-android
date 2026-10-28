@@ -15,7 +15,7 @@ import kotlin.math.sqrt
  * docstring for the configuration and the (parity-only) differences from pysteps.
  * Every function below names the stepsport function it mirrors.
  */
-class EnsembleResult(val members: Array<Array<FloatArray>>, val motion: Motion, val h: Int, val w: Int,
+class EnsembleResult(val members: Members, val motion: Motion, val h: Int, val w: Int,
                      val timings: Map<String, Double> = emptyMap())
 
 /** Seconds since [t0] (System.nanoTime). */
@@ -473,7 +473,8 @@ internal fun member(s: StepsSetup, mo: Motion, m: Int, nLead: Int, seed: Long, k
  * each draws only from its own random streams, so the result does not depend on scheduling.
  */
 fun ensemble(train: List<Grid>, nLead: Int = 12, nMembers: Int = 10, seed: Long = 42,
-             kmPerPixel: Double = 1.0, timestep: Double = 5.0, threads: Int = Runtime.getRuntime().availableProcessors()): EnsembleResult {
+             kmPerPixel: Double = 1.0, timestep: Double = 5.0, threads: Int = Runtime.getRuntime().availableProcessors(),
+             dir: java.io.File? = null): EnsembleResult {
     // Flow and setup split their pixel loops threads-fold; then members run nThreads at a time
     // (capped by the heap left after setup) and each splits its loops ways-fold, so at most
     // nThreads * ways <= threads cores are busy.
@@ -486,22 +487,23 @@ fun ensemble(train: List<Grid>, nLead: Int = 12, nMembers: Int = 10, seed: Long 
         val mo = motion(db, Par(rows, threads))
         val tFlow = since(t0); val t1 = System.nanoTime()
         val s = setup(db.map { it.v }, mo, Par(rows, threads))
-            ?: return EnsembleResult(Array(nMembers) { Array(nLead) { FloatArray(h * w) } }, mo, h, w, mapOf("flow" to tFlow))
+            ?: return EnsembleResult(Members.alloc(nMembers, nLead, h * w, dir), mo, h, w, mapOf("flow" to tFlow))
         val tSetup = since(t1); val t2 = System.nanoTime()
-        // ponytail: ~40 float64 fields per member (cascade spectra, buffers, transients); cap the
-        // threads so a 192 MB Android heap does not run out. Measured, not derived: 40 was fine
-        // on the AVD; a finer cap would need a per-member peak measurement.
+        // ponytail: ~40 float64 fields per member (cascade spectra, buffers, transients) plus its 12
+        // float32 leads until they go off-heap; cap the threads so a 192 MB Android heap does not run
+        // out. Measured, not derived: 40 was fine on the AVD; a finer cap would need a per-member peak.
         val rt = Runtime.getRuntime()
-        val free = rt.maxMemory() - (rt.totalMemory() - rt.freeMemory()) - 4L * nMembers * nLead * h * w
-        val byHeap = (free / (40L * 8 * h * w)).toInt()
+        val free = rt.maxMemory() - (rt.totalMemory() - rt.freeMemory())
+        val byHeap = (free / ((40L + nLead / 2) * 8 * h * w)).toInt()
         val nThreads = maxOf(1, minOf(threads, nMembers, byHeap))
         val ways = maxOf(1, threads / nThreads)
         val par = Par(rows, ways)
         pool = Executors.newFixedThreadPool(nThreads)
+        val members = Members.alloc(nMembers, nLead, h * w, dir)
         val jobs = (0 until nMembers).map { m ->
-            pool.submit<Array<FloatArray>> { member(s, mo, m, nLead, seed, kmPerPixel, timestep, par = par) }
+            pool.submit<Unit> { members.put(m, member(s, mo, m, nLead, seed, kmPerPixel, timestep, par = par)) }
         }
-        val members = jobs.map { it.get() }.toTypedArray()
+        jobs.forEach { it.get() }
         return EnsembleResult(members, mo, h, w, mapOf("flow" to tFlow, "setup" to tSetup, "members" to since(t2),
             "threads" to nThreads.toDouble(), "ways" to ways.toDouble()))
     } finally {

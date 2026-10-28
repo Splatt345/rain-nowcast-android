@@ -6,7 +6,7 @@ import kotlin.math.roundToInt
 
 class Forecast(
     val region: Region, val geo: GridGeo, val past: List<Frame>,
-    val members: Array<Array<FloatArray>>, val mean: Array<FloatArray>, val motion: Motion,
+    val members: Members, val mean: Array<FloatArray>, val motion: Motion,
     val issued: Instant, val modelUsed: Boolean, val modelError: String?,
     /** Seconds per stage: flow, setup, members (the ensemble), model, combine, mean. */
     val timings: Map<String, Double> = emptyMap(),
@@ -24,10 +24,10 @@ class Forecast(
         val minutes = IntArray(last - first + 1) { first + it }
         val np = past.size
         // past frames as the float32 they are in the members' frame list, without copying them
-        fun curve(fut: Array<FloatArray>) = pointSeries(np + fut.size, h, w, motion, row, col, intervalMinutes, 1) { k, i ->
-            if (k < np) past[k].rain.v[i].toFloat().toDouble() else fut[k - np][i].toDouble() }
-        val series = curve(mean)
-        val curves = members.map(::curve)
+        fun curve(fut: (Int, Int) -> Float) = pointSeries(np + mean.size, h, w, motion, row, col, intervalMinutes, 1) { k, i ->
+            if (k < np) past[k].rain.v[i].toFloat().toDouble() else fut(k - np, i).toDouble() }
+        val series = curve { k, i -> mean[k][i] }
+        val curves = (0 until members.count).map { m -> curve { k, i -> members.at(m, k, i) } }
         val prob = DoubleArray(minutes.size) { t -> curves.count { it[t] >= RAIN_THRESHOLD }.toDouble() / curves.size }
         fun band(q: Double, lower: Boolean) = DoubleArray(minutes.size) { t ->
             val p = percentile(DoubleArray(curves.size) { curves[it][t] }, q)
@@ -52,13 +52,15 @@ fun Frame.crop(r0: Int, c0: Int, h: Int, w: Int) = Frame(time,
     Grid(h, w, DoubleArray(h * w) { rain[r0 + it / w, c0 + it % w] }),
     GridGeo(geo.laea, geo.x1 + c0 * geo.px, geo.y2 - r0 * geo.py, geo.px, geo.py, h, w))
 
-class Nowcaster(private val model: SmaatModel?, private val nMembers: Int = 10, private val seed: Long = 42) {
+/** [dir]: where the members are memory-mapped (see [Members]); null keeps them in a direct buffer. */
+class Nowcaster(private val model: SmaatModel?, private val nMembers: Int = 10, private val seed: Long = 42,
+                private val dir: java.io.File? = null) {
     fun run(region: Region, frames: List<Frame>): Forecast {
         val train = frames.map { it.rain }
         val geo = frames.last().geo
         // STEPS' velocity perturbations and incremental mask are in km and minutes
         val ens = ensemble(train, 12, nMembers, seed, kmPerPixel = geo.px / 1000.0,
-            timestep = medianGapMinutes(frames).toDouble())
+            timestep = medianGapMinutes(frames).toDouble(), dir = dir)
         val timings = LinkedHashMap(ens.timings)
         var members = ens.members; var used = false; var err: String? = null
         if (model != null) {
@@ -78,10 +80,11 @@ class Nowcaster(private val model: SmaatModel?, private val nMembers: Int = 10, 
         val n = ens.h * ens.w
         val mean = Array(12) { k -> FloatArray(n) { i ->
             var s = 0.0; var c = 0
-            for (m in members) { val x = m[k][i]; if (!x.isNaN()) { s += x; c++ } }
+            for (m in 0 until members.count) { val x = members.at(m, k, i); if (!x.isNaN()) { s += x; c++ } }
             if (c > 0) (s / c).toFloat() else Float.NaN
         } }
         timings["mean"] = since(t)
+        members.seal()
         return Forecast(region, geo, frames, members, mean, ens.motion, frames.last().time, used, err, timings)
     }
 

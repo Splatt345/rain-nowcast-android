@@ -34,6 +34,14 @@ class NowcasterTest {
         assertTrue(p.summary.isNotBlank())
     }
 
+    @Test fun membersInAMappedFileMatchAndLeaveNoFile() {
+        val d = java.nio.file.Files.createTempDirectory("members").toFile()
+        val a = Nowcaster(model = null, nMembers = 4, dir = d).run(be, frames())
+        val b = Nowcaster(model = null, nMembers = 4).run(be, frames())
+        for (m in 0 until 4) for (k in 0 until 12) assertArrayEquals(b.members[m][k], a.members[m][k], 0f)
+        assertEquals(0, d.listFiles()!!.size); d.delete()
+    }
+
     @Test fun rainAheadOfTheBlobArrives() {
         val fc = Nowcaster(model = null, nMembers = 4).run(be, frames())
         // blob centre at x = 53 in the last frame, moving +3 px/frame: x = 70 is reached in ~30 min

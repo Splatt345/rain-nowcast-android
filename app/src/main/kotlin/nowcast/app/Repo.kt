@@ -137,7 +137,7 @@ class Repo(private val ctx: Context) {
             // The map keeps its own frames meanwhile.
             if (!reuse && old != null) { flow.update { it.copy(forecast = null) }; old = null }
             val fc = if (reuse) old!!
-            else withContext(Dispatchers.Default) { Nowcaster(if (s.useModel) model(region) else null).run(region, frames) }
+            else withContext(Dispatchers.Default) { Nowcaster(if (s.useModel) model(region) else null, dir = ctx.cacheDir).run(region, frames) }
             if (fc.modelError != null && modelBroken == null) modelBroken = fc.modelError
             val note = when {
                 !s.useModel -> null
@@ -236,7 +236,7 @@ class Repo(private val ctx: Context) {
             val last = withContext(Dispatchers.IO) { Snapshot.read(ctx.filesDir) }
             val lastHome = last?.radar?.let { it.homeLat to it.homeLon }
             if (!Cycle.skip(frames.last().time, last?.let { Instant.ofEpochSecond(it.issued) }, Cycle.sameHome(home, lastHome), force)) {
-                fc = withContext(Dispatchers.Default) { Cycle.box(Nowcaster(if (s.useModel) model(region) else null), region, frames, lat, lon) }
+                fc = withContext(Dispatchers.Default) { Cycle.box(Nowcaster(if (s.useModel) model(region) else null, dir = ctx.cacheDir), region, frames, lat, lon) }
                 if (fc.modelError != null && modelBroken == null) modelBroken = fc.modelError
                 result = withContext(Dispatchers.Default) { fc.point(lat, lon) } to fc.issued
             }

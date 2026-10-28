@@ -33,7 +33,7 @@ class PointTest {
     @Test fun combineShiftsMeanAndKeepsSpread() {
         val members = Array(3) { m -> Array(1) { FloatArray(1) { 2f + m } } }   // 2, 3, 4
         val other = Array(1) { FloatArray(1) { 5f } }
-        val out = Combine.combine(members, other, doubleArrayOf(0.5))
+        val out = Combine.combine(Members.of(members), other, doubleArrayOf(0.5))
         // mean 3 -> 3 + 0.5*(5-3) = 4; deviations -1, 0, +1 kept
         assertEquals(3f, out[0][0][0], 1e-6f); assertEquals(5f, out[2][0][0], 1e-6f)
     }
