@@ -17,6 +17,21 @@ Every five minutes the app takes the last hour of EUMETNET OPERA radar, estimate
 - Ready-made regions: Belgium, the Netherlands, Luxembourg, North Rhine-Westphalia, Nord de France; add your own anywhere OPERA covers, with an in-app guide to training a model for it
 - No radar key, or outside Europe? Open-Meteo's models instead, worldwide, no key
 
+### Widgets
+
+<p>
+<img src="play/screenshots/widgets/summary-medium.png" width="300" alt="Summary widget">
+<img src="play/screenshots/widgets/minutes-medium.png" width="300" alt="Next-hour widget">
+<img src="play/screenshots/widgets/hours-medium.png" width="300" alt="48-hour widget">
+<img src="play/screenshots/widgets/radar-medium.png" width="300" alt="Radar widget, medium">
+</p>
+<p>
+<img src="play/screenshots/widgets/radar-large.png" width="300" alt="Radar widget, large">
+<img src="play/screenshots/widgets/combined-large.png" width="300" alt="Combined widget">
+</p>
+
+The screenshots replay a real rainy hour of OPERA radar (3 May 2026) in the debug build's demo mode; see `play/screenshots/rain.sh`.
+
 The radar comes from MeteoGate's Open Radar Data API and needs a free personal key from [meteogate.eu](https://meteogate.eu).
 
 The Home Assistant add-on and integration that run the same nowcast on a server live in their own repository, [Splatt345/ha-rain-nowcast](https://github.com/Splatt345/ha-rain-nowcast).
