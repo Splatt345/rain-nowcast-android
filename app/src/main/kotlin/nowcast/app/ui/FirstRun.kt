@@ -30,9 +30,9 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import kotlin.random.Random
 
-/** Asks for the MeteoGate ORD key; nothing else works without it. */
+/** Asks for the MeteoGate ORD key, or goes on with Open-Meteo, which needs none. */
 @Composable
-fun FirstRun(onKey: (String) -> Unit, onDemo: (() -> Unit)?) {
+fun FirstRun(onKey: (String) -> Unit, onOpenMeteo: () -> Unit, onDemo: (() -> Unit)?) {
     var key by rememberSaveable { mutableStateOf("") }
     var show by rememberSaveable { mutableStateOf(false) }
     val uri = LocalUriHandler.current
@@ -67,6 +67,7 @@ fun FirstRun(onKey: (String) -> Unit, onDemo: (() -> Unit)?) {
                 Text("Get a key at meteogate.eu"); Spacer(Modifier.width(6.dp))
                 Icon(Icons.AutoMirrored.Outlined.OpenInNew, null, Modifier.size(16.dp))
             }
+            TextButton(onOpenMeteo, Modifier.heightIn(min = 48.dp)) { Text("No key? Use Open-Meteo's forecast instead (no radar map)") }
             if (onDemo != null) TextButton(onDemo, Modifier.heightIn(min = 48.dp)) { Text("Try it with the bundled sample radar (debug)") }
         }
     }

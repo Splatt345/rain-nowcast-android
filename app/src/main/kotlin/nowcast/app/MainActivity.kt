@@ -70,10 +70,11 @@ class MainActivity : ComponentActivity() {
 private fun Root(repo: Repo, asked: MutableState<Tab?>) {
     val keys by repo.secrets.sources.collectAsState()
     val settings by repo.prefs.settings.collectAsState()
-    val ready = Repo.SOURCE_OPERA in keys || (BuildConfig.DEBUG && settings.demo)
+    val ready = Repo.SOURCE_OPERA in keys || (BuildConfig.DEBUG && settings.demo) || settings.nowcastSource == NowcastSource.OPEN_METEO
     AnimatedContent(ready, label = "root", transitionSpec = { fadeIn(tween(300)) togetherWith fadeOut(tween(200)) }) { ok ->
         if (!ok) FirstRun(
             onKey = { repo.secrets.set(Repo.SOURCE_OPERA, it) },
+            onOpenMeteo = { repo.prefs.update { s -> s.copy(nowcastSource = NowcastSource.OPEN_METEO) }; repo.kick(force = true) },
             onDemo = if (BuildConfig.DEBUG) ({ repo.prefs.update { s -> s.copy(demo = true) } }) else null,
         ) else Main(repo, asked)
     }
