@@ -4,6 +4,22 @@ import kotlin.math.floor
 import kotlin.math.log10
 import kotlin.math.pow
 
+/**
+ * Splits [0, n) into [ways] contiguous chunks run at once, one on the caller and the rest on
+ * [pool]. Only for loops whose iterations are independent, so results never depend on [ways].
+ */
+class Par(val pool: java.util.concurrent.ExecutorService?, val ways: Int) {
+    fun run(n: Int, body: (Int, Int) -> Unit) {
+        if (pool == null || ways <= 1 || n < ways) { body(0, n); return }
+        val step = (n + ways - 1) / ways
+        val rest = (1 until ways).map { k -> pool.submit { body(minOf(n, k * step), minOf(n, (k + 1) * step)) } }
+        body(0, step)
+        rest.forEach { it.get() }
+    }
+
+    companion object { val SERIAL = Par(null, 1) }
+}
+
 /** Row-major 2-D field. Twin of the helpers at the top of nowcast/lite.py. */
 class Grid(val h: Int, val w: Int, val v: DoubleArray = DoubleArray(h * w)) {
     operator fun get(r: Int, c: Int) = v[r * w + c]
@@ -50,19 +66,34 @@ fun blur(f: Grid, r: Int): Grid {
 
 /** Bilinear, coordinates clamped, NaN read as 0. */
 fun sampleClamped(f: Grid, r: Double, c: Double): Double {
-    val rr = r.coerceIn(0.0, (f.h - 1).toDouble()); val cc = c.coerceIn(0.0, (f.w - 1).toDouble())
-    val r0 = floor(rr).toInt(); val c0 = floor(cc).toInt()
-    val r1 = minOf(r0 + 1, f.h - 1); val c1 = minOf(c0 + 1, f.w - 1)
-    val fr = rr - r0; val fc = cc - c0
-    fun g(a: Int, b: Int) = f[a, b].let { if (it.isNaN()) 0.0 else it }
-    return (1 - fr) * ((1 - fc) * g(r0, c0) + fc * g(r0, c1)) +
-        fr * ((1 - fc) * g(r1, c0) + fc * g(r1, c1))
+    var out = 0.0
+    clampedCell(f.h, f.w, r, c) { i00, i01, i10, i11, fr, fc -> out = bilinear0(f.v, i00, i01, i10, i11, fr, fc) }
+    return out
+}
+
+/** The cell and weights sampleClamped uses at (r, c); [use] gets the four corner indices and
+ *  the fractions. Coordinates are clamped to >= 0 first, so toInt is floor (NaN gives 0, as
+ *  floor(NaN).toInt() does). */
+internal inline fun clampedCell(h: Int, w: Int, r: Double, c: Double,
+                                use: (Int, Int, Int, Int, Double, Double) -> Unit) {
+    val rr = r.coerceIn(0.0, (h - 1).toDouble()); val cc = c.coerceIn(0.0, (w - 1).toDouble())
+    val r0 = rr.toInt(); val c0 = cc.toInt()
+    val r1 = minOf(r0 + 1, h - 1); val c1 = minOf(c0 + 1, w - 1)
+    use(r0 * w + c0, r0 * w + c1, r1 * w + c0, r1 * w + c1, rr - r0, cc - c0)
+}
+
+/** sampleClamped's interpolation of v at a clampedCell, NaN read as 0. */
+@Suppress("NOTHING_TO_INLINE")
+internal inline fun bilinear0(v: DoubleArray, i00: Int, i01: Int, i10: Int, i11: Int, fr: Double, fc: Double): Double {
+    val a = v[i00].let { if (it.isNaN()) 0.0 else it }; val b = v[i01].let { if (it.isNaN()) 0.0 else it }
+    val c = v[i10].let { if (it.isNaN()) 0.0 else it }; val d = v[i11].let { if (it.isNaN()) 0.0 else it }
+    return (1 - fr) * ((1 - fc) * a + fc * b) + fr * ((1 - fc) * c + fc * d)
 }
 
 /** Bilinear; NaN off-grid or next to a NaN. */
 fun sampleOrNaN(f: Grid, r: Double, c: Double): Double {
     if (r < 0 || r > f.h - 1 || c < 0 || c > f.w - 1 || r.isNaN() || c.isNaN()) return Double.NaN
-    val r0 = floor(r).toInt(); val c0 = floor(c).toInt()
+    val r0 = r.toInt(); val c0 = c.toInt()      // r, c >= 0: floor
     val r1 = minOf(r0 + 1, f.h - 1); val c1 = minOf(c0 + 1, f.w - 1)
     val fr = r - r0; val fc = c - c0
     return (1 - fr) * ((1 - fc) * f[r0, c0] + fc * f[r0, c1]) +

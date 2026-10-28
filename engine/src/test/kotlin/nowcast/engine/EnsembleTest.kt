@@ -97,10 +97,21 @@ class EnsembleTest {
         assertEquals(1, structRadius(2.0, 5.0)); assertEquals(2, structRadius(1.0, 5.0))
     }
 
+    @Test fun argsortIsStableWithTheTiesOfLessThan() {
+        val rng = java.util.Random(3)
+        val v = DoubleArray(5000) { when (it % 7) { 0 -> 0.0; 1 -> -0.0; 2 -> -15.0; else -> rng.nextGaussian() * 1e3 } }
+        val want = v.indices.sortedWith { a, b -> if (v[a] < v[b]) -1 else if (v[b] < v[a]) 1 else 0 }
+        assertArrayEquals(want.toIntArray(), argsortStable(v))
+    }
+
     @Test fun deterministicAcrossThreadCounts() {
         val a = ensemble(F.frames(), nLead = 3, nMembers = 4, threads = 1)
         val b = ensemble(F.frames(), nLead = 3, nMembers = 4, threads = 4)
-        for (m in 0 until 4) for (k in 0 until 3) assertArrayEquals(a.members[m][k], b.members[m][k], 0f)
+        val c = ensemble(F.frames(), nLead = 3, nMembers = 4, threads = 16)    // 4 members x 4-way pixel loops
+        assertEquals(4.0, c.timings["ways"]!!, 0.0)
+        for (m in 0 until 4) for (k in 0 until 3) {
+            assertArrayEquals(a.members[m][k], b.members[m][k], 0f); assertArrayEquals(a.members[m][k], c.members[m][k], 0f)
+        }
     }
 
     @Test fun dryInputGivesZeroForecast() {

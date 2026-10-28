@@ -41,4 +41,21 @@ class RadarTest {
         val (r, c) = f.geo.rowCol(50.85, 4.35)
         assertTrue(r in 0 until f.rain.h && c in 0 until f.rain.w)
     }
+
+    @Test fun pruneKeepsJustTheInputWindow() {
+        val dir = java.nio.file.Files.createTempDirectory("cache").toFile()
+        val now = System.currentTimeMillis()
+        fun aged(name: String, minutes: Int, block: Boolean = false) = File(dir, name).apply {
+            if (block) { mkdirs(); File(this, "0").writeText("x") } else writeText("x")
+            setLastModified(now - minutes * 60_000L)
+        }
+        val fresh = aged("a.h5", 65); val old = aged("b.h5", 75)
+        val freshBlocks = aged("a.h5.blocks", 65, true); val oldBlocks = aged("b.h5.blocks", 75, true)
+        RadarSource(null, dir).prune()
+        assertTrue(fresh.exists() && freshBlocks.exists())
+        assertFalse(old.exists() || oldBlocks.exists())
+        RadarSource(null, dir).prune(maxAgeMinutes = 30)
+        assertFalse(fresh.exists() || freshBlocks.exists())
+        dir.deleteRecursively()
+    }
 }

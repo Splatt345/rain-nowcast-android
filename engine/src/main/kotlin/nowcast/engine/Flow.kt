@@ -45,11 +45,14 @@ fun lkPair(a: Grid, b: Grid): Triple<Grid, Grid, Grid> {
 }
 
 /** Last two pairs, confidence-weighted, filled into dry areas. */
-fun motion(db: List<Grid>): Motion {
+fun motion(db: List<Grid>, par: Par = Par.SERIAL): Motion {
     val last = db.last(); val n = last.h * last.w
     var fx = Grid(last.h, last.w); var fy = Grid(last.h, last.w); var fc = Grid(last.h, last.w)
-    for ((a, b) in listOf(db[db.size - 3] to db[db.size - 2], db[db.size - 2] to db[db.size - 1])) {
-        val (vx, vy, c) = lkPair(a, b)
+    val pairs = listOf(db[db.size - 3] to db[db.size - 2], db[db.size - 2] to db[db.size - 1])
+    val flows = arrayOfNulls<Triple<Grid, Grid, Grid>>(2)
+    Par(par.pool, minOf(par.ways, 2)).run(2) { a, b -> for (k in a until b) flows[k] = lkPair(pairs[k].first, pairs[k].second) }
+    for (flow in flows) {
+        val (vx, vy, c) = flow!!
         for (i in 0 until n) { fx.v[i] += c.v[i] * vx.v[i]; fy.v[i] += c.v[i] * vy.v[i]; fc.v[i] += c.v[i] }
     }
     repeat(FILL_PASSES) { fx = blur(fx, FILL_RADIUS); fy = blur(fy, FILL_RADIUS); fc = blur(fc, FILL_RADIUS) }
