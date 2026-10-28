@@ -27,15 +27,23 @@ class EnsembleTest {
         assertClose(F.arr("fft_re"), re, 1e-10, "fft re"); assertClose(F.arr("fft_im"), im, 1e-10, "fft im")
         Fft2(h, w).inverse(re, im)
         assertClose(F.frames()[0].v, re, 1e-12, "ifft")
-        for (n in listOf(1, 2, 7, 13, 64, 338, 364)) {       // against a naive DFT
-            val x = DoubleArray(n) { kotlin.math.sin(1.3 * it * it) }; val y = DoubleArray(n)
+        // against a naive DFT; 331 and 397 take Bluestein
+        for (n in listOf(1, 2, 7, 13, 37, 64, 191, 331, 338, 364, 366, 382, 397)) {
+            val x = DoubleArray(n) { kotlin.math.sin(1.3 * it * it) }; val y = DoubleArray(n) { kotlin.math.cos(0.7 * it) }
             val or = DoubleArray(n); val oi = DoubleArray(n)
-            Fft(n).transform(x, y, 0, 1, or, oi, false)
+            val f = Fft(n)
+            f.transform(x, y, 0, 1, or, oi, false)
             for (k in 0 until n) {
                 var a = 0.0; var b = 0.0
-                for (j in 0 until n) { val t = -2 * Math.PI * j * k / n; a += x[j] * kotlin.math.cos(t); b += x[j] * kotlin.math.sin(t) }
+                for (j in 0 until n) {
+                    val t = -2 * Math.PI * j * k / n; val c = kotlin.math.cos(t); val s = kotlin.math.sin(t)
+                    a += x[j] * c - y[j] * s; b += x[j] * s + y[j] * c
+                }
                 assertEquals(a, or[k], 1e-9 * n); assertEquals(b, oi[k], 1e-9 * n)
             }
+            val br = DoubleArray(n); val bi = DoubleArray(n)
+            f.transform(or, oi, 0, 1, br, bi, true)
+            for (j in 0 until n) { assertEquals(x[j], br[j] / n, 1e-12 * n); assertEquals(y[j], bi[j] / n, 1e-12 * n) }
         }
     }
 

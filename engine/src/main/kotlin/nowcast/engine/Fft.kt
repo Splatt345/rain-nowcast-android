@@ -6,7 +6,8 @@ import kotlin.math.sin
 
 /**
  * Complex FFT of any length: KissFFT's mixed-radix recursion (factors 4, 2, 3, 5, 7, ...)
- * with generic butterflies. numpy's convention: forward exp(-2 pi i jk/n), unscaled;
+ * with generic butterflies, or Bluestein's chirp-z when a prime factor is large (as pocketfft,
+ * numpy's FFT, does). numpy's convention: forward exp(-2 pi i jk/n), unscaled;
  * [inverse] is unscaled too (Fft2 divides). Immutable, so one instance serves all threads.
  */
 class Fft(val n: Int) {
@@ -32,14 +33,67 @@ class Fft(val n: Int) {
 
     /** out = DFT(in), in read at inOff + j*inStride. */
     fun transform(inRe: DoubleArray, inIm: DoubleArray, inOff: Int, inStride: Int,
-                  outRe: DoubleArray, outIm: DoubleArray, inverse: Boolean, sc: DoubleArray = scratch()) {
+                  outRe: DoubleArray, outIm: DoubleArray, inverse: Boolean, sc: Scratch = scratch()) {
         if (n == 1) { outRe[0] = inRe[inOff]; outIm[0] = inIm[inOff]; return }
-        work(outRe, outIm, 0, inRe, inIm, inOff, 1, inStride, 0, inverse, sc)
+        if (inner != null) bluestein(inRe, inIm, inOff, inStride, outRe, outIm, inverse, sc)
+        else work(outRe, outIm, 0, inRe, inIm, inOff, 1, inStride, 0, inverse, sc.sc)
     }
 
     private val maxP = (0 until factors.size step 2).maxOf { factors[it] }
-    /** [transform]'s scratch; pass one in to reuse it across calls. */
-    fun scratch() = DoubleArray(4 * maxP)
+
+    // Bluestein: the DFT as a convolution with the chirp w_k = exp(-i pi k^2/n), done by power-of-2
+    // FFTs of m >= 2n-1 points: O(m log m) instead of the odd butterfly's O(n p). Measured on the JVM it
+    // only pays for big primes: 2x on 397, 1.4x on 331, a tie on 382 = 2*191, 2-3x slower on 366 = 2*3*61.
+    private val m2 = (Integer.highestOneBit(2 * n - 1) shl 1).let { m ->
+        if (n.toLong() * maxP > 8L * m * Integer.numberOfTrailingZeros(m)) m else 0 }
+    private val inner = if (m2 > 0) Fft(m2) else null
+    private val cr = DoubleArray(if (m2 > 0) n else 0); private val ci = DoubleArray(cr.size)
+    /** FFT of the conjugate chirp (forward) and of the chirp (inverse), wrapped and scaled by 1/m. */
+    private val bf = arrayOf(DoubleArray(m2), DoubleArray(m2)); private val bi = arrayOf(DoubleArray(m2), DoubleArray(m2))
+
+    init {
+        if (inner != null) {
+            for (k in 0 until n) {
+                val a = PI * ((k.toLong() * k) % (2L * n)) / n   // k^2 mod 2n keeps the angle exact
+                cr[k] = cos(a); ci[k] = -sin(a)
+            }
+            val sc = inner.scratch()
+            for ((t, sg) in listOf(0 to -1.0, 1 to 1.0)) {
+                val r = DoubleArray(m2); val i = DoubleArray(m2)
+                for (k in 0 until n) { r[k] = cr[k] / m2; i[k] = sg * ci[k] / m2; if (k > 0) { r[m2 - k] = r[k]; i[m2 - k] = i[k] } }
+                inner.transform(r, i, 0, 1, bf[t], bi[t], false, sc)
+            }
+        }
+    }
+
+    /** [transform]'s working arrays; pass one in to reuse it across calls. */
+    class Scratch internal constructor(p: Int, m: Int, internal val inner: Scratch?) {
+        internal val sc = DoubleArray(4 * p)
+        internal val ar = DoubleArray(m); internal val ai = DoubleArray(m)
+        internal val br = DoubleArray(m); internal val bj = DoubleArray(m)
+    }
+    fun scratch(): Scratch = Scratch(if (inner == null) maxP else 0, m2, inner?.scratch())
+
+    private fun bluestein(inRe: DoubleArray, inIm: DoubleArray, inOff: Int, inStride: Int,
+                          outRe: DoubleArray, outIm: DoubleArray, inv: Boolean, s: Scratch) {
+        // the inverse is the same with the chirp conjugated
+        val sg = if (inv) -1.0 else 1.0
+        val ar = s.ar; val ai = s.ai; val br = s.br; val bj = s.bj
+        for (j in 0 until n) {
+            val xr = inRe[inOff + j * inStride]; val xi = inIm[inOff + j * inStride]
+            val wr = cr[j]; val wi = sg * ci[j]
+            ar[j] = xr * wr - xi * wi; ai[j] = xr * wi + xi * wr
+        }
+        ar.fill(0.0, n, m2); ai.fill(0.0, n, m2)
+        inner!!.transform(ar, ai, 0, 1, br, bj, false, s.inner!!)
+        val t = if (inv) 1 else 0; val fr = bf[t]; val fi = bi[t]
+        for (k in 0 until m2) { val r = br[k]; val i = bj[k]; br[k] = r * fr[k] - i * fi[k]; bj[k] = r * fi[k] + i * fr[k] }
+        inner.transform(br, bj, 0, 1, ar, ai, true, s.inner)
+        for (k in 0 until n) {
+            val wr = cr[k]; val wi = sg * ci[k]
+            outRe[k] = ar[k] * wr - ai[k] * wi; outIm[k] = ar[k] * wi + ai[k] * wr
+        }
+    }
 
     private fun work(oRe: DoubleArray, oIm: DoubleArray, oOff: Int, fRe: DoubleArray, fIm: DoubleArray,
                      fOff: Int, fstride: Int, inStride: Int, fi: Int, inv: Boolean, sc: DoubleArray) {
