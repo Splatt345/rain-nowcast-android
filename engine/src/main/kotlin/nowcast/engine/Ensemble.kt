@@ -312,14 +312,15 @@ internal fun fromDbSteps(db: Double): Float {
     return if (r < 0.1) 0f else r.toFloat()
 }
 
-/** Holds only what members read: the band weights and older cascades go after init, ~20 MB
+/** Holds only what members read: the band weights and the cascades go after init, ~27 MB
  *  for Belgium that would otherwise sit on the heap through the whole ensemble. */
 internal class StepsSetup(
     val p: Int, wts: Array<DoubleArray>, val filt: DoubleArray, cascades: List<Cascade>,
     val gammaRaw: Array<DoubleArray>, val gamma: Array<DoubleArray>, val phi: Array<DoubleArray>,
     val last: DoubleArray, val lastSorted: DoubleArray, val fft: Fft2, val par: Par,
 ) {
-    val lastCascade = cascades.last()
+    /** The last cascade's level means and stds (its levels are [last] decomposed again). */
+    val mu = cascades.last().mu; val sd = cascades.last().sd
     /** Half spectra (columns 0..w/2) of the last p cascades' normalised levels, [level][lag] as
      *  re, im pairs: the AR(p) recursion is linear, so members run it in Fourier space. */
     val spec: Array<Array<Pair<DoubleArray, DoubleArray>>> = Array(N_LEVELS) { i -> Array(p) { j ->
@@ -366,7 +367,7 @@ internal fun setup(db3: List<DoubleArray>, mo: Motion, par: Par = Par.SERIAL): S
 internal fun member(s: StepsSetup, mo: Motion, m: Int, nLead: Int, seed: Long, kmPerPixel: Double,
                     timestep: Double, onFirst: ((DoubleArray, DoubleArray) -> Unit)? = null, par: Par = s.par): Array<FloatArray> {
     val h = mo.vx.h; val w = mo.vx.w; val n = h * w; val p = s.p
-    val mu = s.lastCascade.mu; val sd = s.lastCascade.sd
+    val mu = s.mu; val sd = s.sd
     val radius = structRadius(kmPerPixel, timestep)
     val dist = IntArray(n); val sortBuf = SortBuf(n)
     val mask = DoubleArray(n)
