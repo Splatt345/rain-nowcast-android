@@ -51,7 +51,9 @@ class Repo(private val ctx: Context) {
     val regionStore = RegionStore(ctx)
     val modelStore = ModelStore(ctx)
 
-    private val flow = MutableStateFlow(UiState())
+    /** The last results from disk, so a cold start shows them while the first refresh runs. */
+    private val saved = Saved.read(ctx.filesDir, prefs.value.home)
+    private val flow = MutableStateFlow(saved?.state() ?: UiState())
     val state: StateFlow<UiState> = flow
     private val lock = Mutex()
     /** Cycles outlive the screen that asked for them: a dialog or rotation must not throw away 20 s of work. */
@@ -70,7 +72,7 @@ class Repo(private val ctx: Context) {
                 OutlookMeta.parse(ctx.assets.open("outlook/outlook_gbm.json").bufferedReader().readText()))
         }.getOrNull()
     }
-    private var outlookAt: Pair<Double, Double>? = null
+    private var outlookAt: Pair<Double, Double>? = saved?.outlook?.let { prefs.value.home }
 
     val demo: Boolean get() = BuildConfig.DEBUG && prefs.value.demo
     val hasKey: Boolean get() = demo || secrets.get(SOURCE_OPERA) != null
@@ -140,6 +142,11 @@ class Repo(private val ctx: Context) {
         refreshOutlook(s)
         val st = flow.value
         if (!openMeteo) publish(st.forecast, st.point, full = true)
+        save()
+    }
+
+    private suspend fun save() = withContext(Dispatchers.IO) {
+        runCatching { Saved.write(ctx.filesDir, Saved.of(flow.value, prefs.value.home)) }
     }
 
     /** The Now screen, widgets and alert from Open-Meteo: one small request, no radar, no key needed. */
@@ -159,6 +166,7 @@ class Repo(private val ctx: Context) {
         }
         refreshOutlook(s)
         publishPoint(full = true)
+        save()
     }
 
     private suspend fun publishPoint(full: Boolean) {

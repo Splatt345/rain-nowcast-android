@@ -4,7 +4,6 @@ import android.net.Uri
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -178,12 +177,12 @@ private fun RegionEditor(repo: Repo, start: Region, isNew: Boolean, others: List
 @Composable
 private fun BoxMap(bbox: List<Double>, onBox: (List<Double>) -> Unit) {
     val mapView = rememberMapView()
-    val dark = isSystemInDarkTheme()
+    val dark = mapIsDark()
     var map by remember { mutableStateOf<MapLibreMap?>(null) }
     var style by remember { mutableStateOf<Style?>(null) }
     LaunchedEffect(mapView, dark) {
         mapView.getMapAsync { m -> map = m; m.uiSettings.isRotateGesturesEnabled = false; m.uiSettings.isLogoEnabled = false; m.uiSettings.isAttributionEnabled = false
-            m.setStyle(Style.Builder().fromJson(osmStyle(dark))) { style = it } }
+            m.setStyle(mapStyle(dark)) { style = it } }
     }
     val valid = bbox.size == 4 && bbox.all { it.isFinite() } && bbox[0] < bbox[2] && bbox[1] < bbox[3]
     LaunchedEffect(map) {

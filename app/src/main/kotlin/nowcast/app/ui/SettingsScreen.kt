@@ -233,7 +233,7 @@ private fun Main(repo: Repo, openRegions: () -> Unit, openGuide: () -> Unit, mod
                 0.1f..0.9f, 7, s.notify) { v -> update { it.copy(notifyThreshold = (v * 10).roundToInt() / 10.0) } }
         }
         Text("Radar: EUMETNET OPERA via MeteoGate · Outlook" + (if (s.nowcastSource == NowcastSource.OPEN_METEO) " and nowcast" else "") +
-            ": Open-Meteo (weather data by Open-Meteo.com, CC BY 4.0) · Map: © OpenStreetMap contributors",
+            ": Open-Meteo (weather data by Open-Meteo.com, CC BY 4.0) · Map: OpenFreeMap © OpenMapTiles, data © OpenStreetMap contributors",
             style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(start = 4.dp, top = 20.dp))
     }

@@ -2,7 +2,6 @@ package nowcast.app.ui
 
 import android.graphics.Bitmap
 import androidx.compose.foundation.background
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -21,6 +20,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -36,6 +36,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import nowcast.app.MapFrames
 import nowcast.app.NowcastSource
 import nowcast.app.Repo
 import nowcast.app.UiState
@@ -52,20 +53,22 @@ import org.maplibre.android.maps.Style
 import org.maplibre.android.style.layers.CircleLayer
 import org.maplibre.android.style.layers.PropertyFactory.*
 import org.maplibre.android.style.layers.RasterLayer
+import org.maplibre.android.style.layers.SymbolLayer
 import org.maplibre.android.style.sources.GeoJsonSource
 import org.maplibre.android.style.sources.ImageSource
 import org.maplibre.geojson.Point
 import java.time.Duration
 import java.time.Instant
 
-/** OSM raster basemap. Dark mode inverts its lightness (brightness min/max swapped) and turns the hue back. */
-fun osmStyle(dark: Boolean): String {
-    val paint = if (dark) """"raster-brightness-min":0.92,"raster-brightness-max":0.06,"raster-saturation":-0.75,"raster-hue-rotate":180,"raster-contrast":0.05"""
-    else """"raster-saturation":-0.35,"raster-contrast":-0.05"""
-    return """{"version":8,"sources":{"osm":{"type":"raster","tiles":["https://tile.openstreetmap.org/{z}/{x}/{y}.png"],
-        "tileSize":256,"maxzoom":19,"attribution":"© OpenStreetMap contributors"}},
-        "layers":[{"id":"osm","type":"raster","source":"osm","paint":{$paint}}]}"""
-}
+/** OpenFreeMap vector basemaps (no key, no limits): Dark at night, Positron by day. */
+fun mapStyle(dark: Boolean): Style.Builder =
+    Style.Builder().fromUri("https://tiles.openfreemap.org/styles/" + if (dark) "dark" else "positron")
+
+const val MAP_CREDIT = "OpenFreeMap © OpenMapTiles Data from OpenStreetMap"
+
+/** The app's own light/dark (Settings can force one), not the system's. */
+@Composable
+fun mapIsDark() = MaterialTheme.colorScheme.surface.luminance() < 0.5f
 
 /** A MapView bound to the composition's lifecycle. */
 @Composable
@@ -87,25 +90,25 @@ fun rememberMapView(): MapView {
     return view
 }
 
-private class Frames(val levels: List<ByteArray>, val w: Int, val h: Int, val times: List<Instant>, val fc: Forecast)
-
-private fun render(fc: Forecast): Frames {
+private fun render(fc: Forecast): MapFrames {
     val s = Render.mercatorSampler(fc.geo, fc.region.bbox, width = 512)
     val fields = fc.past.map { f -> FloatArray(f.rain.v.size) { f.rain.v[it].toFloat() } } + fc.mean.toList()
     val times = fc.past.map { it.time } + (1..fc.mean.size).map { fc.issued.plusSeconds(60L * fc.intervalMinutes * it) }
-    return Frames(fields.map { Render.levels(it, fc.geo.h, fc.geo.w, s) }, s.width, s.height, times, fc)
+    return MapFrames(fields.map { Render.levels(it, fc.geo.h, fc.geo.w, s) }, s.width, s.height, times, fc.region.bbox,
+        fc.region.id, fc.issued, fc.past.size - 1)
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MapScreen(repo: Repo, state: UiState, now: Instant) {
     val settings by repo.prefs.settings.collectAsState()
-    val dark = isSystemInDarkTheme()
+    val dark = mapIsDark()
+    val ctx = LocalContext.current
     val mapView = rememberMapView()
     var map by remember { mutableStateOf<MapLibreMap?>(null) }
     var style by remember { mutableStateOf<Style?>(null) }
     val fc = state.forecast
-    var frames by remember { mutableStateOf<Frames?>(null) }
+    var frames by remember { mutableStateOf<MapFrames?>(null) }
     var index by rememberSaveable { mutableIntStateOf(-1) }
     var playing by remember { mutableStateOf(false) }
     var sheet by remember { mutableStateOf<LatLng?>(null) }
@@ -113,11 +116,17 @@ fun MapScreen(repo: Repo, state: UiState, now: Instant) {
     val scope = rememberCoroutineScope()
     val haptic = LocalHapticFeedback.current
 
+    // until this run's forecast is in, the last one drawn (from disk on a cold start), if under 3 h old
     LaunchedEffect(fc) {
-        if (fc == null) return@LaunchedEffect
-        val f = withContext(Dispatchers.Default) { render(fc) }
+        val f = if (fc == null) {
+            if (frames != null) return@LaunchedEffect
+            withContext(Dispatchers.IO) { MapFrames.read(ctx.filesDir) }
+                ?.takeIf { Duration.between(it.issued, Instant.now()).toHours() < 3 } ?: return@LaunchedEffect
+        } else withContext(Dispatchers.Default) {
+            render(fc).also { runCatching { MapFrames.write(ctx.filesDir, it) } }
+        }
         frames = f
-        if (index !in f.levels.indices) index = fc.past.size - 1          // the newest radar frame
+        if (index !in f.levels.indices) index = f.newest          // the newest radar frame
     }
     LaunchedEffect(playing, frames) {
         val f = frames ?: return@LaunchedEffect
@@ -130,7 +139,7 @@ fun MapScreen(repo: Repo, state: UiState, now: Instant) {
             m.uiSettings.isRotateGesturesEnabled = false; m.uiSettings.isTiltGesturesEnabled = false
             m.uiSettings.isLogoEnabled = false
             m.uiSettings.isAttributionEnabled = false    // shown as text on the map instead
-            m.setStyle(Style.Builder().fromJson(osmStyle(dark))) { st -> style = st }
+            m.setStyle(mapStyle(dark)) { st -> style = st }
             m.addOnMapClickListener { ll ->
                 sheet = ll; sheetPoint = null
                 scope.launch { sheetPoint = repo.pointAt(ll.latitude, ll.longitude) }
@@ -139,9 +148,9 @@ fun MapScreen(repo: Repo, state: UiState, now: Instant) {
         }
     }
     // camera: frame the region once per region
-    val regionId = fc?.region?.id
+    val regionId = frames?.regionId
     LaunchedEffect(map, regionId) {
-        val m = map ?: return@LaunchedEffect; val b = fc?.region?.bbox ?: return@LaunchedEffect
+        val m = map ?: return@LaunchedEffect; val b = frames?.bbox ?: return@LaunchedEffect
         m.moveCamera(CameraUpdateFactory.newLatLngBounds(LatLngBounds.from(b[3], b[2], b[1], b[0]), 40))
     }
     // overlay
@@ -152,12 +161,15 @@ fun MapScreen(repo: Repo, state: UiState, now: Instant) {
         val bmp = withContext(Dispatchers.Default) {
             Bitmap.createBitmap(Render.argb(f.levels[index], lut), f.w, f.h, Bitmap.Config.ARGB_8888)
         }
-        val b = f.fc.region.bbox
+        val b = f.bbox
         val quad = LatLngQuad(LatLng(b[3], b[0]), LatLng(b[3], b[2]), LatLng(b[1], b[2]), LatLng(b[1], b[0]))
         val src = st.getSourceAs<ImageSource>("rain")
         if (src == null) {
             st.addSource(ImageSource("rain", quad, bmp))
-            st.addLayer(RasterLayer("rain", "rain").withProperties(rasterFadeDuration(0f), rasterOpacity(0.9f), rasterResampling("linear")))
+            // under the place names, so towns stay readable through the rain
+            val labels = st.layers.firstOrNull { it is SymbolLayer }?.id
+            val layer = RasterLayer("rain", "rain").withProperties(rasterFadeDuration(0f), rasterOpacity(0.9f), rasterResampling("linear"))
+            if (labels != null) st.addLayerBelow(layer, labels) else st.addLayer(layer)
         } else { src.setCoordinates(quad); src.setImage(bmp) }
     }
     // home marker
@@ -174,7 +186,7 @@ fun MapScreen(repo: Repo, state: UiState, now: Instant) {
 
     Box(Modifier.fillMaxSize()) {
         AndroidView({ mapView }, Modifier.fillMaxSize().semantics { contentDescription = "Rain map. Tap a place for its forecast." })
-        Text("© OpenStreetMap contributors", style = MaterialTheme.typography.labelSmall,
+        Text(MAP_CREDIT, style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.align(Alignment.TopStart).statusBarsPadding().padding(8.dp)
                 .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.8f), RoundedCornerShape(6.dp)).padding(horizontal = 6.dp, vertical = 2.dp))
         PalettePicker(settings.palette, settings.radarColors, { p -> repo.updateLook { it.copy(palette = p) } },
@@ -186,7 +198,7 @@ fun MapScreen(repo: Repo, state: UiState, now: Instant) {
             shape = RoundedCornerShape(28.dp), color = MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.96f),
             shadowElevation = 6.dp) {
             Column(Modifier.padding(start = 8.dp, end = 18.dp, top = 8.dp, bottom = 10.dp)) {
-                if (fc == null && (!repo.hasKey || settings.nowcastSource == NowcastSource.OPEN_METEO)) {
+                if (fc == null && f == null && (!repo.hasKey || settings.nowcastSource == NowcastSource.OPEN_METEO)) {
                     Text(if (!repo.hasKey) "The radar map needs a MeteoGate key (Settings). The Now screen and widgets use Open-Meteo without one."
                         else "Open-Meteo mode loads no radar for home. Tap a place in Europe to load the radar there.",
                         Modifier.padding(12.dp), style = MaterialTheme.typography.bodyMedium)
@@ -198,7 +210,7 @@ fun MapScreen(repo: Repo, state: UiState, now: Instant) {
                 } else {
                     val t = f.times[index]
                     val rel = Duration.between(now, t).toMinutes().toInt()
-                    val future = t > f.fc.issued
+                    val future = t > f.issued
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         FilledIconButton({ playing = !playing }, Modifier.size(48.dp)) {
                             Icon(if (playing) Icons.Outlined.Pause else Icons.Outlined.PlayArrow, if (playing) "Pause" else "Play")
