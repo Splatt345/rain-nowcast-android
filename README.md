@@ -19,7 +19,7 @@ Every five minutes the app takes the last hour of EUMETNET OPERA radar, estimate
 
 The radar comes from MeteoGate's Open Radar Data API and needs a free personal key from [meteogate.eu](https://meteogate.eu).
 
-The Home Assistant add-on and integration that run the same nowcast on a server live in their own repository, **ha-rain-nowcast**.
+The Home Assistant add-on and integration that run the same nowcast on a server live in their own repository, [Splatt345/ha-rain-nowcast](https://github.com/Splatt345/ha-rain-nowcast).
 
 ## Build
 
