@@ -77,6 +77,9 @@ class Bench {
                 println("BENCH cycle ok: model ${fc.modelUsed} ${fc.modelError ?: ""} point ${hash(p.values)} levels ${lv.size}")
                 return
             }
+            val h = fr[0].geo.h; val w = fr[0].geo.w
+            val fft = Fft2(h, w); val fre = Rng.normals(1, h * w); val fim = DoubleArray(h * w)
+            time("fft2 fwd+inv (1 thread)", 20) { fft.forward(fre, fim); fft.inverse(fre, fim) }
             val m = model()
             val n = if (what == "quick") 1 else 3
             val fc0 = time("run (no model)", n) { Nowcaster(null).run(be, fr) }
@@ -98,6 +101,7 @@ class Bench {
             time("argb", 20 * n) { Render.argb(wp, lut) }
             println("BENCH hash members0 ${fc0.members.sumOf { mm -> mm.sumOf { hash(it) } }} members ${fc.members.sumOf { mm -> mm.sumOf { hash(it) } }} mean ${fc.mean.sumOf { hash(it) }}")
             println("BENCH hash point ${listOf(p.values, p.probability, p.pmin, p.p10, p.p25, p.p75, p.p90, p.pmax).map { hash(it) }} ${p.summary}")
+            println("BENCH hash fft ${hash(fre)} ${hash(fim)}")
             println("BENCH hash levels ${lv.sumOf { hash(it) }} motion ${hash(rm.dx)} ${hash(rm.dy)} warp ${hash(wp)} sampler ${hash(s.rows)} ${hash(s.cols)}")
             m.close()
         }
