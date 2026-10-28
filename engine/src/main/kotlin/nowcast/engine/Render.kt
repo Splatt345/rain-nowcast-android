@@ -9,6 +9,8 @@ object Render {
     const val LEVEL_STEPS = 64
     const val SMOOTH_PX = 0.8
     const val DEFAULT_PALETTE = "blue-green"
+    /** The user's own colours, one per rate stop of [DEFAULT_PALETTE]. */
+    const val CUSTOM = "custom"
 
     private fun rgb(r: Int, g: Int, b: Int) = (r shl 16) or (g shl 8) or b
 
@@ -49,8 +51,13 @@ object Render {
         return ys[j] + (x - xs[j]) * (ys[j + 1] - ys[j]) / (xs[j + 1] - xs[j])
     }
 
-    fun lut(name: String): IntArray {
-        val stops = PALETTES[name] ?: PALETTES.getValue(DEFAULT_PALETTE)
+    /** [DEFAULT_PALETTE]'s rates with [colors] (RGB) in their place; missing ones keep the default. */
+    fun stops(colors: List<Int>): List<Pair<Double, Int>> =
+        PALETTES.getValue(DEFAULT_PALETTE).mapIndexed { i, (r, c) -> r to (colors.getOrNull(i)?.and(0xFFFFFF) ?: c) }
+
+    fun lut(name: String): IntArray = lut(PALETTES[name] ?: PALETTES.getValue(DEFAULT_PALETTE))
+
+    fun lut(stops: List<Pair<Double, Int>>): IntArray {
         val xs = DoubleArray(stops.size) { log10(stops[it].first) }
         fun ch(shift: Int) = DoubleArray(stops.size) { (stops[it].second shr shift and 255).toDouble() }
         val r = ch(16); val g = ch(8); val b = ch(0)
@@ -125,8 +132,9 @@ object Render {
 
     private val alpha = alphaLut()
 
-    fun argb(levels: ByteArray, palette: String): IntArray {
-        val t = lut(palette)
+    fun argb(levels: ByteArray, palette: String): IntArray = argb(levels, lut(palette))
+
+    fun argb(levels: ByteArray, t: IntArray): IntArray {
         return IntArray(levels.size) { i -> val l = levels[i].toInt() and 255; (alpha[l] shl 24) or t[l] }
     }
 }

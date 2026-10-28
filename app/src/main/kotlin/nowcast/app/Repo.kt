@@ -55,6 +55,9 @@ class Repo(private val ctx: Context) {
 
     fun kick(force: Boolean = false) { if (force || !lock.isLocked) scope.launch { refresh(force) } }
 
+    /** A colour change: the widgets draw with these settings too, so redraw them now rather than at the next refresh. */
+    fun updateLook(f: (Settings) -> Settings) { prefs.update(f); scope.launch { runCatching { Widgets.updateAll(ctx) } } }
+
     private var modelBroken: String? = null           // a failed model is not retried until restart
     private var smaat: Pair<String, SmaatModel>? = null
     private val outlookModel by lazy { runCatching { OutlookModel(ctx.assets.open("outlook/outlook_gbm.onnx").readBytes()) }.getOrNull() }

@@ -9,6 +9,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Home
+import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.material.icons.outlined.Pause
 import androidx.compose.material.icons.outlined.PlayArrow
@@ -143,11 +144,12 @@ fun MapScreen(repo: Repo, state: UiState, now: Instant) {
         m.moveCamera(CameraUpdateFactory.newLatLngBounds(LatLngBounds.from(b[3], b[2], b[1], b[0]), 40))
     }
     // overlay
-    LaunchedEffect(style, frames, index, settings.palette) {
+    val lut = remember(settings.palette, settings.radarColors) { settings.radarLut() }
+    LaunchedEffect(style, frames, index, lut) {
         val st = style ?: return@LaunchedEffect; val f = frames ?: return@LaunchedEffect
         if (index !in f.levels.indices) return@LaunchedEffect
         val bmp = withContext(Dispatchers.Default) {
-            Bitmap.createBitmap(Render.argb(f.levels[index], settings.palette), f.w, f.h, Bitmap.Config.ARGB_8888)
+            Bitmap.createBitmap(Render.argb(f.levels[index], lut), f.w, f.h, Bitmap.Config.ARGB_8888)
         }
         val b = f.fc.region.bbox
         val quad = LatLngQuad(LatLng(b[3], b[0]), LatLng(b[3], b[2]), LatLng(b[1], b[2]), LatLng(b[1], b[0]))
@@ -174,7 +176,8 @@ fun MapScreen(repo: Repo, state: UiState, now: Instant) {
         Text("© OpenStreetMap contributors", style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.align(Alignment.TopStart).statusBarsPadding().padding(8.dp)
                 .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.8f), RoundedCornerShape(6.dp)).padding(horizontal = 6.dp, vertical = 2.dp))
-        PalettePicker(settings.palette, { p -> repo.prefs.update { it.copy(palette = p) } },
+        PalettePicker(settings.palette, settings.radarColors, { p -> repo.updateLook { it.copy(palette = p) } },
+            { c -> repo.updateLook { it.copy(palette = Render.CUSTOM, radarColors = c) } },
             Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(8.dp))
 
         val f = frames
@@ -202,7 +205,7 @@ fun MapScreen(repo: Repo, state: UiState, now: Instant) {
                             Text(if (future) "Forecast (ensemble mean)" else "Radar", style = MaterialTheme.typography.labelSmall,
                                 color = if (future) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
                         }
-                        RateLegend(settings.palette)
+                        RateLegend(lut)
                     }
                     Slider(index.toFloat(), { v -> val i = v.toInt(); if (i != index) { index = i; playing = false
                             haptic.performHapticFeedback(HapticFeedbackType.SegmentFrequentTick) } },
@@ -239,8 +242,7 @@ fun MapScreen(repo: Repo, state: UiState, now: Instant) {
 }
 
 @Composable
-private fun RateLegend(palette: String) {
-    val lut = remember(palette) { Render.lut(palette) }
+private fun RateLegend(lut: IntArray) {
     val colors = remember(lut) { listOf(30, 90, 140, 190, 240).map { Color(0xFF000000.toInt() or lut[it]) } }
     Column(horizontalAlignment = Alignment.End) {
         Box(Modifier.size(84.dp, 8.dp).clip(RoundedCornerShape(4.dp)).background(Brush.horizontalGradient(colors)))
@@ -249,13 +251,16 @@ private fun RateLegend(palette: String) {
 }
 
 @Composable
-private fun PalettePicker(current: String, onPick: (String) -> Unit, modifier: Modifier) {
+private fun PalettePicker(current: String, custom: List<Int>, onPick: (String) -> Unit, onCustom: (List<Int>) -> Unit,
+                          modifier: Modifier) {
     var open by remember { mutableStateOf(false) }
+    var editing by remember { mutableStateOf(false) }
+    if (editing) RadarColorsDialog(custom, { editing = false }) { onCustom(it); editing = false }
     Box(modifier) {
         FilledTonalIconButton({ open = true }, Modifier.size(48.dp)) { Icon(Icons.Outlined.Palette, "Colour scale") }
         DropdownMenu(open, { open = false }) {
-            Render.PALETTES.keys.forEach { name ->
-                val lut = Render.lut(name)
+            (Render.PALETTES.keys + Render.CUSTOM).forEach { name ->
+                val lut = if (name == Render.CUSTOM) Render.lut(Render.stops(custom)) else Render.lut(name)
                 DropdownMenuItem(
                     text = { Text(name.replaceFirstChar { it.uppercase() }) },
                     leadingIcon = {
@@ -266,6 +271,9 @@ private fun PalettePicker(current: String, onPick: (String) -> Unit, modifier: M
                     onClick = { onPick(name); open = false },
                 )
             }
+            HorizontalDivider()
+            DropdownMenuItem({ Text("Edit custom colours…") }, { open = false; editing = true },
+                leadingIcon = { Icon(Icons.Outlined.Edit, null) })
         }
     }
 }

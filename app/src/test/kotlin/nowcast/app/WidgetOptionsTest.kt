@@ -5,7 +5,7 @@ import org.junit.Test
 
 class WidgetOptionsTest {
     @Test fun roundTrips() {
-        val o = WidgetOptions(WidgetType.RADAR, WidgetTheme.DYNAMIC, 40, RainUnits.WORDS, false, TapAction.REFRESH, 30)
+        val o = WidgetOptions(WidgetType.RADAR, WidgetTheme.DYNAMIC, 40, RainUnits.WORDS, false, TapAction.REFRESH, 30, RefreshButton.BOTTOM)
         assertEquals(o, WidgetOptions.fromMap(o.toMap()))
     }
 
@@ -15,11 +15,12 @@ class WidgetOptionsTest {
         val d = WidgetOptions()
         assertEquals(WidgetTheme.SYSTEM, d.theme); assertEquals(100, d.opacity); assertEquals(true, d.showChance)
         assertEquals(TapAction.OPEN_NOW, d.tap); assertEquals(0, d.lead); assertEquals(RainUnits.MMH, d.units)
+        assertEquals(RefreshButton.OFF, d.refresh)
     }
 
     @Test fun garbageFallsBackOneByOne() {
         val o = WidgetOptions.fromMap(mapOf("type" to "PIE", "theme" to "DARK", "opacity" to "250", "showChance" to "yes",
-            "lead" to "45", "tap" to "OPEN_MAP"), WidgetType.MINUTES)
+            "lead" to "45", "tap" to "OPEN_MAP", "refresh" to "LEFT"), WidgetType.MINUTES)
         assertEquals(WidgetOptions(type = WidgetType.MINUTES, theme = WidgetTheme.DARK, tap = TapAction.OPEN_MAP), o)
         assertEquals(0, WidgetOptions.fromMap(mapOf("opacity" to "-3")).opacity)
     }

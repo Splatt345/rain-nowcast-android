@@ -147,8 +147,8 @@ object WidgetCharts {
     }
 
     /** The radar crop in its own colours (opaque-free ARGB at its native 128 px). */
-    fun rain(f: SFrame, r: SRadar, palette: String): Bitmap =
-        Bitmap.createBitmap(Render.argb(f.bytes(), palette), r.w, r.h, Bitmap.Config.ARGB_8888)
+    fun rain(f: SFrame, r: SRadar, lut: IntArray): Bitmap =
+        Bitmap.createBitmap(Render.argb(f.bytes(), lut), r.w, r.h, Bitmap.Config.ARGB_8888)
 
     /** Coast, borders, a 25 km ring and home, as masks the same shape as [rain]. */
     fun radarMarks(ctx: Context, r: SRadar, sizeDp: Float, density: Float): List<Layer> {

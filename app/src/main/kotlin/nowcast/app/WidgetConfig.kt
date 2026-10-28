@@ -25,6 +25,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.DpSize
@@ -135,6 +136,12 @@ private fun ConfigScreen(o: WidgetOptions, widget: RainWidgetBase, onChange: (Wi
                 colors = ListItemDefaults.colors(containerColor = Color.Transparent))
             Section("Tap opens")
             Choice(TapAction.entries, o.tap, { it.label }) { onChange(o.copy(tap = it)) }
+            Section("Refresh button")
+            Choice(RefreshButton.entries, o.refresh, { it.label }) { onChange(o.copy(refresh = it)) }
+            val background = (LocalContext.current.applicationContext as App).repo.prefs.value.background
+            Text(if (background) "Updates every 15 min anyway; the button fetches the latest radar now."
+                 else "Background updates are off, so this widget only changes when you open the app or press the button.",
+                style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Spacer(Modifier.height(8.dp))
         }
     }

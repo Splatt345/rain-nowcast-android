@@ -37,6 +37,7 @@ import androidx.glance.text.TextStyle
 import androidx.glance.unit.ColorProvider as GlanceColor
 import nowcast.app.ui.AppDark
 import nowcast.app.ui.AppLight
+import nowcast.app.ui.appSchemes
 import nowcast.engine.OutlookBars
 import java.time.Instant
 import java.time.ZoneId
@@ -117,11 +118,14 @@ fun actualSizes(b: Bundle): List<DpSize> {
     return listOf(DpSize(minW.dp, maxH.dp), DpSize(maxW.dp, minH.dp))
 }
 
-private fun schemes(ctx: Context, t: WidgetTheme): Pair<ColorScheme, ColorScheme> = when (t) {
-    WidgetTheme.LIGHT -> AppLight to AppLight
-    WidgetTheme.DARK -> AppDark to AppDark
-    WidgetTheme.DYNAMIC -> if (Build.VERSION.SDK_INT >= 31) dynamicLightColorScheme(ctx) to dynamicDarkColorScheme(ctx) else AppLight to AppDark
-    WidgetTheme.SYSTEM -> AppLight to AppDark
+private fun schemes(ctx: Context, t: WidgetTheme, s: Settings): Pair<ColorScheme, ColorScheme> {
+    val (light, dark) = appSchemes(ctx, s)
+    return when (t) {
+        WidgetTheme.LIGHT -> light to light
+        WidgetTheme.DARK -> dark to dark
+        WidgetTheme.DYNAMIC -> if (Build.VERSION.SDK_INT >= 31) dynamicLightColorScheme(ctx) to dynamicDarkColorScheme(ctx) else AppLight to AppDark
+        WidgetTheme.SYSTEM -> light to dark
+    }
 }
 
 private fun tapAction(ctx: Context, t: TapAction): Action = when (t) {
@@ -135,12 +139,12 @@ private val PAD = 12.dp
 
 /** Everything a layout needs, computed once per composition. */
 private class W(val ctx: Context, val o: WidgetOptions, val s: Snapshot, val now: Instant,
-                val light: ColorScheme, val dark: ColorScheme, wDp: Float, hDp: Float) {
+                val light: ColorScheme, val dark: ColorScheme, wDp: Float, hDp: Float, settings: Settings) {
     val age = s.age(now)
     val density = ctx.resources.displayMetrics.density
     val sentence = RainWords.sentence(s.summary(now), o.units)
     val chance = if (o.showChance) s.chance(now) else null
-    val palette by lazy { (ctx.applicationContext as? App)?.repo?.prefs?.value?.palette ?: nowcast.engine.Render.DEFAULT_PALETTE }
+    val lut by lazy { settings.radarLut() }
     /** Inner size, inside the padding. */
     val iw = wDp - 2 * PAD.value; val ih = hDp - 2 * PAD.value
     fun mix(p: Float): GlanceColor = ColorProvider(day = lerp(light.surfaceVariant, light.primary, p.coerceIn(0f, 1f)),
@@ -155,26 +159,45 @@ private fun WidgetContent(ctx: Context, o: WidgetOptions, snap: Snapshot?, now: 
     // the launcher never shows a bucket no real size maps to: skip its bitmaps, RemoteViews carry all of them
     if (actual.isNotEmpty() && mine.isEmpty()) { Box(GlanceModifier.fillMaxSize()) {}; return }
     val target = mine.maxByOrNull { it.width.value * it.height.value } ?: bucket
-    val (light, dark) = schemes(ctx, o.theme)
+    val settings = (ctx.applicationContext as? App)?.repo?.prefs?.value ?: Settings()
+    val (light, dark) = schemes(ctx, o.theme, settings)
     val a = o.opacity / 100f
     GlanceTheme(colors = ColorProviders(light, dark)) {
         val (type, cls) = WidgetLayout.pick(o.type, target.width.value, target.height.value)
         Box(
             GlanceModifier.fillMaxSize().cornerRadius(24.dp)
                 .background(ColorProvider(day = light.surface.copy(alpha = a), night = dark.surface.copy(alpha = a)))
-                .padding(PAD).clickable(tapAction(ctx, if (snap == null) TapAction.OPEN_NOW else o.tap)),
-            contentAlignment = Alignment.CenterStart,
+                .clickable(tapAction(ctx, if (snap == null) TapAction.OPEN_NOW else o.tap)),
         ) {
-            if (snap == null) { Empty("No radar yet · open the app", cls); return@Box }
-            val w = W(ctx, o, snap, now, light, dark, target.width.value, target.height.value)
-            when (type) {
-                WidgetType.SUMMARY -> Summary(w, cls)
-                WidgetType.MINUTES -> Minutes(w, cls)
-                WidgetType.HOURS -> Hours(w, cls)
-                WidgetType.RADAR -> Radar(w, cls)
-                WidgetType.COMBINED -> Combined(w)
+            // a bottom button gets its own strip: charts and axis labels run into that corner
+            val reserve = if (o.refresh == RefreshButton.BOTTOM && cls != SizeClass.SMALL) 22f else 0f
+            Box(GlanceModifier.fillMaxSize().padding(start = PAD, top = PAD, end = PAD, bottom = PAD + reserve.dp),
+                contentAlignment = Alignment.CenterStart) {
+                if (snap == null) { Empty("No radar yet · open the app", cls); return@Box }
+                val w = W(ctx, o, snap, now, light, dark, target.width.value, target.height.value - reserve, settings)
+                when (type) {
+                    WidgetType.SUMMARY -> Summary(w, cls)
+                    WidgetType.MINUTES -> Minutes(w, cls)
+                    WidgetType.HOURS -> Hours(w, cls)
+                    WidgetType.RADAR -> Radar(w, cls)
+                    WidgetType.COMBINED -> Combined(w)
+                }
             }
+            if (o.refresh != RefreshButton.OFF) RefreshButtonOverlay(o.refresh, cls)
         }
+    }
+}
+
+/** A small round button in a corner, over the content; runs one refresh whatever background updates are set to. */
+@Composable
+private fun RefreshButtonOverlay(at: RefreshButton, cls: SizeClass) {
+    val d = if (cls == SizeClass.SMALL) 24 else 30
+    Box(GlanceModifier.fillMaxSize().padding(4.dp),
+        contentAlignment = if (at == RefreshButton.TOP) Alignment.TopEnd else Alignment.BottomEnd) {
+        Image(ImageProvider(R.drawable.ic_refresh), contentDescription = "Refresh now",
+            modifier = GlanceModifier.size(d.dp).cornerRadius((d / 2).dp).background(GlanceTheme.colors.secondaryContainer)
+                .padding((d / 5).dp).clickable(actionRunCallback<RefreshNow>()),
+            colorFilter = ColorFilter.tint(GlanceTheme.colors.onSecondaryContainer))
     }
 }
 
@@ -371,7 +394,7 @@ private fun Radar(w: W, cls: SizeClass) {
 private fun RadarMap(w: W, r: SRadar, f: SFrame, sizeDp: Float, what: String) {
     val s = sizeDp.coerceAtLeast(24f)
     Box(GlanceModifier.size(s.dp).cornerRadius(14.dp).background(GlanceTheme.colors.surfaceVariant)) {
-        Image(ImageProvider(WidgetCharts.rain(f, r, w.palette)), contentDescription = null, modifier = GlanceModifier.fillMaxSize(),
+        Image(ImageProvider(WidgetCharts.rain(f, r, w.lut)), contentDescription = null, modifier = GlanceModifier.fillMaxSize(),
             contentScale = ContentScale.Fit)
         Chart(WidgetCharts.radarMarks(w.ctx, r, s, w.density),
             "$what around home, ${Snapshot.HALF_KM.toInt() * 2} km across. ${w.sentence}", GlanceModifier.fillMaxSize())

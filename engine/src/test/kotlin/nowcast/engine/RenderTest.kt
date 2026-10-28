@@ -52,4 +52,11 @@ class RenderTest {
         assertEquals(32 * s.height, px.size)
         assertTrue(px.any { it ushr 24 == 0 } && px.any { it ushr 24 == 215 })
     }
+
+    @Test fun customColoursSitOnTheDefaultRates() {
+        assertTrue(Render.lut(Render.stops(emptyList())).contentEquals(Render.lut(Render.DEFAULT_PALETTE)))
+        val red = Render.lut(Render.stops(List(9) { 0xFF0000 }))
+        assertTrue(red.all { it == 0xFF0000 })
+        assertEquals(0x123456, Render.stops(listOf(0x7F123456))[0].second)     // alpha is not a colour
+    }
 }

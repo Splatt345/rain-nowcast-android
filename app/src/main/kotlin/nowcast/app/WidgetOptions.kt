@@ -5,9 +5,11 @@ enum class WidgetType(val label: String) {
     SUMMARY("Summary"), MINUTES("Next hour, per minute"), HOURS("Next 48 h"), RADAR("Radar"), COMBINED("Combined")
 }
 
-enum class WidgetTheme(val label: String) { SYSTEM("System"), LIGHT("Light"), DARK("Dark"), DYNAMIC("Dynamic colour") }
+/** SYSTEM, LIGHT and DARK use the app's colours (Settings → Look); DYNAMIC is always the wallpaper's. */
+enum class WidgetTheme(val label: String) { SYSTEM("App"), LIGHT("Light"), DARK("Dark"), DYNAMIC("Wallpaper") }
 enum class RainUnits(val label: String) { MMH("mm/h"), WORDS("Words") }
 enum class TapAction(val label: String) { OPEN_NOW("Open Now"), OPEN_MAP("Open Map"), REFRESH("Refresh now") }
+enum class RefreshButton(val label: String) { OFF("None"), TOP("Top corner"), BOTTOM("Bottom corner") }
 
 data class WidgetOptions(
     val type: WidgetType = WidgetType.SUMMARY,
@@ -18,10 +20,12 @@ data class WidgetOptions(
     val tap: TapAction = TapAction.OPEN_NOW,
     /** Radar type: minutes after the newest frame, one of [LEADS]. */
     val lead: Int = 0,
+    val refresh: RefreshButton = RefreshButton.OFF,
 ) {
     fun toMap(): Map<String, String> = mapOf(
         "v" to VERSION.toString(), "type" to type.name, "theme" to theme.name, "opacity" to opacity.toString(),
-        "units" to units.name, "showChance" to showChance.toString(), "tap" to tap.name, "lead" to lead.toString())
+        "units" to units.name, "showChance" to showChance.toString(), "tap" to tap.name, "lead" to lead.toString(),
+        "refresh" to refresh.name)
 
     companion object {
         const val VERSION = 1
@@ -43,6 +47,7 @@ data class WidgetOptions(
                 showChance = s("showChance")?.toBooleanStrictOrNull() ?: d.showChance,
                 tap = TapAction.entries.firstOrNull { it.name == s("tap") } ?: d.tap,
                 lead = s("lead")?.toIntOrNull()?.takeIf { it in LEADS } ?: d.lead,
+                refresh = RefreshButton.entries.firstOrNull { it.name == s("refresh") } ?: d.refresh,
             )
         }
     }
