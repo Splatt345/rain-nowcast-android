@@ -1,4 +1,5 @@
-Rain Nowcast uses the following data and open-source software.
+Rain Nowcast is free software under the GNU General Public License, version 3 or later.
+It uses the following data and open-source software.
 
 DATA
 - Radar: EUMETNET OPERA composites via MeteoGate's Open Radar Data API (CC BY 4.0).

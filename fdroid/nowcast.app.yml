@@ -1,9 +1,9 @@
 # Draft for fdroiddata: copy to metadata/<applicationId>.yml in your fork of
-# https://gitlab.com/fdroid/fdroiddata and fill in the two REPLACE lines first.
+# https://gitlab.com/fdroid/fdroiddata and fill in the REPLACE lines first.
 # Description, summary and screenshots come from fastlane/ in the app's repo.
 Categories:
   - Weather
-License: REPLACE-with-SPDX-id    # e.g. GPL-3.0-or-later; must match the LICENSE file
+License: GPL-3.0-or-later
 AuthorName: REPLACE-your-name
 SourceCode: https://REPLACE-forge/REPLACE-user/rain-nowcast-android
 IssueTracker: https://REPLACE-forge/REPLACE-user/rain-nowcast-android/issues
