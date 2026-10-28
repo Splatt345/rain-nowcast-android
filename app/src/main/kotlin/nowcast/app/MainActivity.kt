@@ -2,6 +2,8 @@ package nowcast.app
 
 import android.Manifest
 import android.os.Build
+import android.content.Context
+import android.content.Intent
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -40,16 +42,32 @@ import java.time.Instant
 enum class Tab { NOW, MAP, SETTINGS }
 
 class MainActivity : ComponentActivity() {
+    /** A tab asked for by a widget tap, consumed by [Main]. */
+    private val asked = mutableStateOf<Tab?>(null)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         val repo = (application as App).repo
-        setContent { NowcastTheme { Root(repo) } }
+        if (savedInstanceState == null) asked.value = tabOf(intent)
+        setContent { NowcastTheme { Root(repo, asked) } }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        asked.value = tabOf(intent)
+    }
+
+    companion object {
+        private const val TAB = "tab"
+        private fun tabOf(i: Intent?) = i?.getStringExtra(TAB)?.let { t -> Tab.entries.firstOrNull { it.name == t } }
+        fun intent(ctx: Context, tab: Tab): Intent = Intent(ctx, MainActivity::class.java).putExtra(TAB, tab.name)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
     }
 }
 
 @Composable
-private fun Root(repo: Repo) {
+private fun Root(repo: Repo, asked: MutableState<Tab?>) {
     val keys by repo.secrets.sources.collectAsState()
     val settings by repo.prefs.settings.collectAsState()
     val ready = Repo.SOURCE_OPERA in keys || (BuildConfig.DEBUG && settings.demo)
@@ -57,15 +75,16 @@ private fun Root(repo: Repo) {
         if (!ok) FirstRun(
             onKey = { repo.secrets.set(Repo.SOURCE_OPERA, it) },
             onDemo = if (BuildConfig.DEBUG) ({ repo.prefs.update { s -> s.copy(demo = true) } }) else null,
-        ) else Main(repo)
+        ) else Main(repo, asked)
     }
 }
 
 @Composable
-private fun Main(repo: Repo) {
+private fun Main(repo: Repo, asked: MutableState<Tab?>) {
     val state by repo.state.collectAsState()
     val settings by repo.prefs.settings.collectAsState()
     var tab by rememberSaveable { mutableStateOf(Tab.NOW) }
+    LaunchedEffect(asked.value) { asked.value?.let { tab = it; asked.value = null } }
     val scope = rememberCoroutineScope()
     val lifecycle = LocalLifecycleOwner.current.lifecycle
 

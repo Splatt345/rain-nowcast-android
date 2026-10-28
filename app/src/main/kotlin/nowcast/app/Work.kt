@@ -31,6 +31,14 @@ class RefreshWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ct
 
     companion object {
         private const val NAME = "refresh"
+
+        /** A widget's "refresh now": one run as soon as there is a network. */
+        fun now(ctx: Context) {
+            WorkManager.getInstance(ctx).enqueueUniqueWork("$NAME-now", ExistingWorkPolicy.KEEP,
+                OneTimeWorkRequestBuilder<RefreshWorker>()
+                    .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
+                    .build())
+        }
         fun schedule(ctx: Context, on: Boolean) {
             val wm = WorkManager.getInstance(ctx)
             if (!on) { wm.cancelUniqueWork(NAME); return }

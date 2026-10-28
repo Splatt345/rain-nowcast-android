@@ -13,7 +13,7 @@ import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 
 // Fallback palette (no dynamic colour): storm blue, wet-slate surfaces, a teal for "clearing".
-private val Light = lightColorScheme(
+internal val AppLight = lightColorScheme(
     primary = Color(0xFF1F5FA8), onPrimary = Color.White,
     primaryContainer = Color(0xFFD5E3FF), onPrimaryContainer = Color(0xFF001B3D),
     secondary = Color(0xFF2E7D7B), onSecondary = Color.White,
@@ -30,7 +30,7 @@ private val Light = lightColorScheme(
     error = Color(0xFFB3261E), errorContainer = Color(0xFFF9DEDC), onErrorContainer = Color(0xFF410E0B),
 )
 
-private val Dark = darkColorScheme(
+internal val AppDark = darkColorScheme(
     primary = Color(0xFF9CC7FF), onPrimary = Color(0xFF00315F),
     primaryContainer = Color(0xFF16477F), onPrimaryContainer = Color(0xFFD5E3FF),
     secondary = Color(0xFF8CD5D2), onSecondary = Color(0xFF003736),
@@ -76,8 +76,8 @@ fun NowcastTheme(dark: Boolean = isSystemInDarkTheme(), content: @Composable () 
     val scheme = when {
         Build.VERSION.SDK_INT >= Build.VERSION_CODES.S ->
             if (dark) dynamicDarkColorScheme(LocalContext.current) else dynamicLightColorScheme(LocalContext.current)
-        dark -> Dark
-        else -> Light
+        dark -> AppDark
+        else -> AppLight
     }
     MaterialTheme(colorScheme = scheme, typography = AppType, content = content)
 }

@@ -2,4 +2,13 @@
 <resources>
     <string name="app_name">Rain Nowcast</string>
     <string name="widget_description">Rain in the next hour at home</string>
+    <string name="widget_summary">Rain summary</string>
+    <string name="widget_minutes">Rain graph</string>
+    <string name="widget_minutes_description">Rain rate, minute by minute, for the next hour</string>
+    <string name="widget_hours">Rain 48 h</string>
+    <string name="widget_hours_description">Half-hour rain bars for the next two days</string>
+    <string name="widget_radar">Rain radar</string>
+    <string name="widget_radar_description">The latest radar around home</string>
+    <string name="widget_combined">Rain overview</string>
+    <string name="widget_combined_description">Next hour and next 12 h together</string>
 </resources>

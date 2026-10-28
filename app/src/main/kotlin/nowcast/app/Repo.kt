@@ -1,7 +1,6 @@
 package nowcast.app
 
 import android.content.Context
-import androidx.glance.appwidget.updateAll
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -42,6 +41,7 @@ data class UiState(
 
 /** One cycle for the screens, the worker and the widget. Holds the ensemble in memory so taps only re-trace points. */
 class Repo(private val ctx: Context) {
+    init { ctx.deleteSharedPreferences("widget") }    // the old one-line snapshot; widget.json replaced it
     val prefs = Prefs(ctx)
     val secrets = Secrets(ctx)
     val regionStore = RegionStore(ctx)
@@ -160,27 +160,20 @@ class Repo(private val ctx: Context) {
         refresh()
     }
 
-    /** What the widget and the notification read when the process is cold. */
+    /** Snapshot for the widgets, then re-render them all, so their age stays true even when the refresh failed. */
     private suspend fun writeSnapshot() {
         val st = flow.value
-        val p = st.point ?: return
-        val fc = st.forecast ?: return
-        val age = Duration.between(fc.issued, Instant.now()).toMinutes().toInt()
-        val probs = (0 until 12).map { k ->
-            p.minutes.indices.filter { p.minutes[it] - age in k * 5 until k * 5 + 5 }.maxOfOrNull { p.probability[it] } ?: 0.0
+        val p = st.point; val fc = st.forecast
+        val home = prefs.value.home
+        if (p != null && fc != null && fc.region.contains(home.first, home.second)) withContext(Dispatchers.IO) {
+            val now = Instant.now()
+            runCatching { Snapshot.of(fc, p, OutlookBars.join(st.outlook, p, fc.issued, now), home, full = true, now).write(ctx.filesDir) }
         }
-        ctx.getSharedPreferences(WIDGET, Context.MODE_PRIVATE).edit()
-            .putString("summary", p.summary)
-            .putString("probs", probs.joinToString(","))
-            .putLong("issued", fc.issued.toEpochMilli())
-            .putString("region", fc.region.name)
-            .apply()
-        runCatching { RainWidget().updateAll(ctx) }
+        runCatching { Widgets.updateAll(ctx) }
     }
 
     companion object {
         const val SOURCE_OPERA = "opera"
-        const val WIDGET = "widget"
     }
 }
 
