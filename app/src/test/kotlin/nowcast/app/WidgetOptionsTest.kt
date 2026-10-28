@@ -5,7 +5,7 @@ import org.junit.Test
 
 class WidgetOptionsTest {
     @Test fun roundTrips() {
-        val o = WidgetOptions(WidgetType.RADAR, WidgetTheme.DYNAMIC, 40, RainUnits.WORDS, false, TapAction.REFRESH, 30, RefreshButton.BOTTOM)
+        val o = WidgetOptions(WidgetType.RADAR, WidgetTheme.DYNAMIC, 40, RainUnits.WORDS, false, TapAction.REFRESH, 30, RefreshButton.BOTTOM, TextSize.LARGE)
         assertEquals(o, WidgetOptions.fromMap(o.toMap()))
     }
 
@@ -43,5 +43,19 @@ class WidgetOptionsTest {
         assertEquals("Rain starting in 5 min (60% chance), up to heavy",
             RainWords.sentence("Rain starting in 5 min (60% chance), up to 12,4 mm/h", RainUnits.WORDS))
         assertEquals("Raining now, 3.1 mm/h", RainWords.sentence("Raining now, 3.1 mm/h", RainUnits.MMH))
+    }
+
+    @Test fun widgetSentencesReadAtAGlance() {
+        val n = "\u00A0"
+        assertEquals("Rain starting in 5${n}min, up to 1.2${n}mm/h",
+            RainWords.widget("Rain starting in 5 min (80% chance), up to 1.2 mm/h", RainUnits.MMH, chanceShown = true))
+        assertEquals("Rain starting in 5${n}min (80% chance), up to moderate",
+            RainWords.widget("Rain starting in 5 min (80% chance), up to 3.1 mm/h", RainUnits.WORDS, chanceShown = false))
+        assertEquals("Rain now, stops in 12${n}min", RainWords.short("Raining now, 0.4 mm/h, stopping in 12 min"))
+        assertEquals("Raining now", RainWords.short("Raining now, 0.4 mm/h"))
+        assertEquals("Rain in 5${n}min", RainWords.short("Rain starting in 5 min (80% chance), up to 1.2 mm/h"))
+        assertEquals("Probably dry", RainWords.short("Probably dry, but a 30% chance of rain in the next 60 min"))
+        assertEquals("Dry for 55${n}min", RainWords.short("Dry for the next 55 minutes"))
+        assertEquals("No forecast yet · open the app", RainWords.short("No forecast yet · open the app"))
     }
 }

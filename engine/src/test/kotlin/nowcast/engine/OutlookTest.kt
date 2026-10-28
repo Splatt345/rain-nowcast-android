@@ -115,4 +115,10 @@ class OutlookTest {
         assertEquals(0.1, h.series.getValue("icon_d2")[0], 0.0); assertTrue(h.series.getValue("icon_d2")[1].isNaN())
         assertEquals(0.2, h.series.getValue("member01")[1], 0.0)
     }
+
+    @Test fun modelOnlyWhereItWasTrained() {
+        assertTrue(OutlookFeatures.trainedAt(50.85, 4.35))       // Brussels
+        assertFalse(OutlookFeatures.trainedAt(52.37, 4.90))      // Amsterdam: north of every training point
+        assertFalse(OutlookFeatures.trainedAt(51.0, 7.0))        // Cologne side
+    }
 }

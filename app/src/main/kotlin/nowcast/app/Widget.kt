@@ -142,8 +142,14 @@ private class W(val ctx: Context, val o: WidgetOptions, val s: Snapshot, val now
                 val light: ColorScheme, val dark: ColorScheme, wDp: Float, hDp: Float, settings: Settings) {
     val age = s.age(now)
     val density = ctx.resources.displayMetrics.density
-    val sentence = RainWords.sentence(s.summary(now), o.units)
     val chance = if (o.showChance) s.chance(now) else null
+    val sentence = RainWords.widget(s.summary(now), o.units, chance != null)
+    /** One line on a 2×1. */
+    val short = RainWords.short(s.summary(now))
+    /** Text scale: fonts and the room reserved for text grow together, the charts take what is left. */
+    val t = o.text.scale
+    fun sp(v: Int) = (v * t).sp
+    fun px(v: Int) = v * t
     val lut by lazy { settings.radarLut() }
     /** Inner size, inside the padding. */
     val iw = wDp - 2 * PAD.value; val ih = hDp - 2 * PAD.value
@@ -173,7 +179,7 @@ private fun WidgetContent(ctx: Context, o: WidgetOptions, snap: Snapshot?, now: 
             val reserve = if (o.refresh == RefreshButton.BOTTOM && cls != SizeClass.SMALL) 22f else 0f
             Box(GlanceModifier.fillMaxSize().padding(start = PAD, top = PAD, end = PAD, bottom = PAD + reserve.dp),
                 contentAlignment = Alignment.CenterStart) {
-                if (snap == null) { Empty("No radar yet · open the app", cls); return@Box }
+                if (snap == null) { Empty("No radar yet · open the app", cls, o.text.scale); return@Box }
                 val w = W(ctx, o, snap, now, light, dark, target.width.value, target.height.value - reserve, settings)
                 when (type) {
                     WidgetType.SUMMARY -> Summary(w, cls)
@@ -202,19 +208,19 @@ private fun RefreshButtonOverlay(at: RefreshButton, cls: SizeClass) {
 }
 
 @Composable
-private fun Empty(msg: String, cls: SizeClass) {
+private fun Empty(msg: String, cls: SizeClass, t: Float) {
     Column(GlanceModifier.fillMaxSize(), verticalAlignment = Alignment.CenterVertically) {
-        if (cls != SizeClass.SMALL) Text("Rain Nowcast", style = TextStyle(color = GlanceTheme.colors.primary, fontSize = 13.sp, fontWeight = FontWeight.Medium))
-        Text(msg, maxLines = 2, style = TextStyle(color = GlanceTheme.colors.onSurface, fontSize = if (cls == SizeClass.SMALL) 13.sp else 16.sp, fontWeight = FontWeight.Medium))
+        if (cls != SizeClass.SMALL) Text("Rain Nowcast", style = TextStyle(color = GlanceTheme.colors.primary, fontSize = (13 * t).sp, fontWeight = FontWeight.Medium))
+        Text(msg, maxLines = 2, style = TextStyle(color = GlanceTheme.colors.onSurface, fontSize = ((if (cls == SizeClass.SMALL) 13 else 16) * t).sp, fontWeight = FontWeight.Medium))
     }
 }
 
 @Composable
-private fun AgeText(w: W, size: Int = 12, prefix: String? = null) {
+private fun AgeText(w: W, size: Int = 13, prefix: String? = null) {
     val stale = Freshness.stale(w.age)
     Text(listOfNotNull(prefix, Freshness.text(w.age)).joinToString(" · "), maxLines = 1,
         style = TextStyle(color = if (stale) GlanceTheme.colors.error else GlanceTheme.colors.onSurfaceVariant,
-            fontSize = size.sp, fontWeight = if (stale) FontWeight.Medium else FontWeight.Normal))
+            fontSize = w.sp(size), fontWeight = if (stale) FontWeight.Medium else FontWeight.Normal))
 }
 
 /** "40%" + region · age. */
@@ -222,7 +228,7 @@ private fun AgeText(w: W, size: Int = 12, prefix: String? = null) {
 private fun Header(w: W, chanceSp: Int = 26) {
     Row(GlanceModifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         w.chance?.let {
-            Text("$it%", style = TextStyle(color = GlanceTheme.colors.primary, fontSize = chanceSp.sp, fontWeight = FontWeight.Bold))
+            Text("$it%", style = TextStyle(color = GlanceTheme.colors.primary, fontSize = w.sp(chanceSp), fontWeight = FontWeight.Bold))
             Spacer(GlanceModifier.width(10.dp))
         }
         AgeText(w, prefix = w.s.region)
@@ -232,7 +238,7 @@ private fun Header(w: W, chanceSp: Int = 26) {
 @Composable
 private fun Sentence(w: W, text: String = w.sentence, sp: Int = 15, lines: Int = 2) =
     Text(text, maxLines = lines, modifier = GlanceModifier.fillMaxWidth(),
-        style = TextStyle(color = GlanceTheme.colors.onSurface, fontSize = sp.sp, fontWeight = FontWeight.Medium))
+        style = TextStyle(color = GlanceTheme.colors.onSurface, fontSize = w.sp(sp), fontWeight = FontWeight.Medium))
 
 @Composable
 private fun Chart(layers: List<Layer>, desc: String, modifier: GlanceModifier) {
@@ -249,14 +255,14 @@ private fun Chart(layers: List<Layer>, desc: String, modifier: GlanceModifier) {
 @Composable
 private fun MinuteChart(w: W, hDp: Float, axes: Boolean) {
     val h = hDp.coerceAtLeast(16f)
-    Chart(WidgetCharts.minutes(w.s, w.now, w.iw, h, w.density, w.o.units, axes),
+    Chart(WidgetCharts.minutes(w.s, w.now, w.iw, h, w.density, w.o.units, axes, w.t),
         "Rain rate from 30 minutes ago to an hour ahead. ${w.sentence}", GlanceModifier.fillMaxWidth().height(h.dp))
 }
 
 @Composable
 private fun HourChart(w: W, hours: Int, hDp: Float) {
     val h = hDp.coerceAtLeast(20f)
-    Chart(WidgetCharts.hours(w.s, w.now, hours, w.iw, h, w.density),
+    Chart(WidgetCharts.hours(w.s, w.now, hours, w.iw, h, w.density, w.t),
         "Rain over the next $hours hours, in half hours; darker is likelier. ${hoursSentence(w)}",
         GlanceModifier.fillMaxWidth().height(h.dp))
 }
@@ -271,12 +277,15 @@ private fun Summary(w: W, cls: SizeClass) {
     if (cls == SizeClass.SMALL) {
         Row(GlanceModifier.fillMaxSize(), verticalAlignment = Alignment.CenterVertically) {
             w.chance?.let {
-                Text("$it%", style = TextStyle(color = GlanceTheme.colors.primary, fontSize = 22.sp, fontWeight = FontWeight.Bold))
+                Text("$it%", style = TextStyle(color = GlanceTheme.colors.primary, fontSize = w.sp(if (w.t > 1.2f) 20 else 24), fontWeight = FontWeight.Bold))
                 Spacer(GlanceModifier.width(8.dp))
             }
             Column(GlanceModifier.defaultWeight().fillMaxHeight(), verticalAlignment = Alignment.CenterVertically) {
-                Sentence(w, sp = 13, lines = if (w.ih >= 44) 2 else 1)
-                AgeText(w, 11)
+                // larger text: the sentence gets two lines and the age shows only when it is a warning
+                val roomy = w.t == 1f
+                // a 2×1 has 56 dp inside: two lines fit up to Large, so Extra large stays at Large here
+                Sentence(w, w.short, sp = if (w.t > 1.2f) 12 else 14, lines = if (roomy) 1 else 2)
+                if (roomy || Freshness.stale(w.age)) AgeText(w, 12)
             }
         }
         return
@@ -300,13 +309,13 @@ private fun Summary(w: W, cls: SizeClass) {
         }
         Spacer(GlanceModifier.height(4.dp))
         Row(GlanceModifier.fillMaxWidth()) {
-            Text("now", style = TextStyle(color = GlanceTheme.colors.onSurfaceVariant, fontSize = 11.sp))
+            Text("now", style = TextStyle(color = GlanceTheme.colors.onSurfaceVariant, fontSize = w.sp(12)))
             Spacer(GlanceModifier.defaultWeight())
-            Text("+60 min", style = TextStyle(color = GlanceTheme.colors.onSurfaceVariant, fontSize = 11.sp))
+            Text("+60 min", style = TextStyle(color = GlanceTheme.colors.onSurfaceVariant, fontSize = w.sp(12)))
         }
         if (big) {
             Spacer(GlanceModifier.height(18.dp))
-            Text("Next 12 h", style = TextStyle(color = GlanceTheme.colors.onSurfaceVariant, fontSize = 11.sp))
+            Text("Next 12 h", style = TextStyle(color = GlanceTheme.colors.onSurfaceVariant, fontSize = w.sp(12)))
             HourChart(w, 12, 64f)
         }
     }
@@ -317,10 +326,10 @@ private fun Minutes(w: W, cls: SizeClass) {
     if (cls == SizeClass.SMALL) {
         Column(GlanceModifier.fillMaxSize()) {
             Row(GlanceModifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                w.chance?.let { Text("$it% ", style = TextStyle(color = GlanceTheme.colors.primary, fontSize = 14.sp, fontWeight = FontWeight.Bold)) }
-                Text(w.sentence, maxLines = 1, style = TextStyle(color = GlanceTheme.colors.onSurface, fontSize = 12.sp, fontWeight = FontWeight.Medium))
+                w.chance?.let { Text("$it% ", style = TextStyle(color = GlanceTheme.colors.primary, fontSize = w.sp(14), fontWeight = FontWeight.Bold)) }
+                Text(w.short, maxLines = 1, style = TextStyle(color = GlanceTheme.colors.onSurface, fontSize = w.sp(13), fontWeight = FontWeight.Medium))
             }
-            MinuteChart(w, w.ih - 18, axes = false)
+            MinuteChart(w, w.ih - w.px(19), axes = false)
         }
         return
     }
@@ -329,7 +338,7 @@ private fun Minutes(w: W, cls: SizeClass) {
         Header(w, if (big) 26 else 18)
         Sentence(w, sp = if (big) 15 else 13, lines = 2)
         Spacer(GlanceModifier.height(4.dp))
-        MinuteChart(w, w.ih - (if (big) 34 else 24) - (if (big) 40 else 34) - 4, axes = true)
+        MinuteChart(w, w.ih - w.px((if (big) 34 else 24) + (if (big) 40 else 36)) - 4, axes = true)
     }
 }
 
@@ -339,17 +348,17 @@ private fun Hours(w: W, cls: SizeClass) {
     Column(GlanceModifier.fillMaxSize()) {
         if (cls == SizeClass.SMALL) {
             Row(GlanceModifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text("Next 12 h", style = TextStyle(color = GlanceTheme.colors.onSurface, fontSize = 12.sp, fontWeight = FontWeight.Medium))
+                Text("Next 12\u00A0h", style = TextStyle(color = GlanceTheme.colors.onSurface, fontSize = w.sp(13), fontWeight = FontWeight.Medium))
                 Spacer(GlanceModifier.defaultWeight())
-                AgeText(w, 11)
+                AgeText(w, 12)
             }
-            HourChart(w, hours, w.ih - 16)
+            HourChart(w, hours, w.ih - w.px(17))
         } else {
             val big = cls == SizeClass.LARGE
-            Sentence(w, hoursSentence(w), sp = if (big) 16 else 13, lines = 2)
-            AgeText(w, 11, prefix = "Next $hours h")
+            Sentence(w, RainWords.widget(hoursSentence(w), RainUnits.MMH, false), sp = if (big) 16 else 13, lines = 2)
+            AgeText(w, 12, prefix = "Next $hours\u00A0h")
             Spacer(GlanceModifier.height(6.dp))
-            HourChart(w, hours, w.ih - (if (big) 42 else 36) - 14 - 6)
+            HourChart(w, hours, w.ih - w.px((if (big) 42 else 36) + 16) - 6)
         }
     }
 }
@@ -358,7 +367,7 @@ private fun Hours(w: W, cls: SizeClass) {
 private fun Radar(w: W, cls: SizeClass) {
     val r = w.s.radar
     val f = r?.frame(w.o.lead)
-    if (r == null || f == null) { Empty("No radar yet · open the app", cls); return }
+    if (r == null || f == null) { Empty("No radar yet · open the app", cls, w.t); return }
     val t = HM.format(Instant.ofEpochSecond(w.s.issued + 60L * f.lead).atZone(ZoneId.systemDefault()))
     val what = if (f.lead == 0) "Radar $t" else "Forecast $t (+${f.lead} min)"
     if (cls == SizeClass.LARGE) {
@@ -367,11 +376,11 @@ private fun Radar(w: W, cls: SizeClass) {
             Sentence(w, sp = 13, lines = 2)
             Spacer(GlanceModifier.height(6.dp))
             Row(GlanceModifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
-                RadarMap(w, r, f, min(w.iw, w.ih - 28 - 36 - 6 - 20), what)
+                RadarMap(w, r, f, min(w.iw, w.ih - w.px(28 + 36 + 20) - 6), what)
             }
             Spacer(GlanceModifier.height(4.dp))
             Text(what, modifier = GlanceModifier.fillMaxWidth(),
-                style = TextStyle(color = GlanceTheme.colors.onSurfaceVariant, fontSize = 12.sp, textAlign = androidx.glance.text.TextAlign.Center))
+                style = TextStyle(color = GlanceTheme.colors.onSurfaceVariant, fontSize = w.sp(13), textAlign = androidx.glance.text.TextAlign.Center))
         }
         return
     }
@@ -380,12 +389,12 @@ private fun Radar(w: W, cls: SizeClass) {
         Spacer(GlanceModifier.width(10.dp))
         Column(GlanceModifier.defaultWeight()) {
             if (cls == SizeClass.MEDIUM) {
-                w.chance?.let { Text("$it%", style = TextStyle(color = GlanceTheme.colors.primary, fontSize = 20.sp, fontWeight = FontWeight.Bold)) }
+                w.chance?.let { Text("$it%", style = TextStyle(color = GlanceTheme.colors.primary, fontSize = w.sp(20), fontWeight = FontWeight.Bold)) }
                 Sentence(w, sp = 13, lines = 3)
                 Spacer(GlanceModifier.height(4.dp))
             }
-            Text(what, maxLines = 1, style = TextStyle(color = GlanceTheme.colors.onSurface, fontSize = 12.sp, fontWeight = FontWeight.Medium))
-            AgeText(w, 11)
+            Text(what, maxLines = 1, style = TextStyle(color = GlanceTheme.colors.onSurface, fontSize = w.sp(13), fontWeight = FontWeight.Medium))
+            AgeText(w, 12)
         }
     }
 }
@@ -408,7 +417,7 @@ private fun Combined(w: W) {
         Sentence(w, sp = 15, lines = 2)
         Spacer(GlanceModifier.height(4.dp))
         val bars = 62f
-        MinuteChart(w, w.ih - 34 - 40 - 4 - 8 - bars, axes = true)
+        MinuteChart(w, w.ih - w.px(34 + 40) - 4 - 8 - bars, axes = true)
         Spacer(GlanceModifier.height(8.dp))
         HourChart(w, 12, bars)
     }

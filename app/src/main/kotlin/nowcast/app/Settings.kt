@@ -9,6 +9,8 @@ enum class DarkMode(val label: String) { SYSTEM("System"), LIGHT("Light"), DARK(
 
 data class Settings(
     val homeLat: Double? = null, val homeLon: Double? = null,
+    /** Home moves with the phone (coarse location). */
+    val followLocation: Boolean = false,
     val regionId: String? = null,                      // null = auto (the region containing home)
     val view: NowView = NowView.NOWCAST,
     val palette: String = Render.DEFAULT_PALETTE,
@@ -31,6 +33,7 @@ data class Settings(
     fun toMap(): Map<String, String> = buildMap {
         homeLat?.let { put("homeLat", it.toString()) }; homeLon?.let { put("homeLon", it.toString()) }
         regionId?.let { put("regionId", it) }
+        put("followLocation", followLocation.toString())
         put("view", view.name); put("palette", palette)
         put("radarColors", radarColors.joinToString(",") { hex(it) }); put("appColors", appColors.name)
         put("accent", hex(accent)); put("darkMode", darkMode.name)
@@ -57,6 +60,7 @@ data class Settings(
             val lon = s("homeLon")?.toDoubleOrNull()?.takeIf { it in -180.0..180.0 }
             return Settings(
                 homeLat = if (lon != null) lat else null, homeLon = if (lat != null) lon else null,
+                followLocation = b("followLocation", d.followLocation),
                 regionId = s("regionId")?.takeIf { it.isNotBlank() },
                 view = NowView.entries.firstOrNull { it.name == s("view") } ?: d.view,
                 palette = s("palette")?.takeIf { it == Render.CUSTOM || it in Render.PALETTES } ?: d.palette,

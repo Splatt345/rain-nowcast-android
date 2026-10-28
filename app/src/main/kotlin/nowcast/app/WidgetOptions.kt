@@ -9,6 +9,7 @@ enum class WidgetType(val label: String) {
 enum class WidgetTheme(val label: String) { SYSTEM("App"), LIGHT("Light"), DARK("Dark"), DYNAMIC("Wallpaper") }
 enum class RainUnits(val label: String) { MMH("mm/h"), WORDS("Words") }
 enum class TapAction(val label: String) { OPEN_NOW("Open Now"), OPEN_MAP("Open Map"), REFRESH("Refresh now") }
+enum class TextSize(val label: String, val scale: Float) { NORMAL("Normal", 1f), LARGE("Large", 1.2f), HUGE("Extra large", 1.4f) }
 enum class RefreshButton(val label: String) { OFF("None"), TOP("Top corner"), BOTTOM("Bottom corner") }
 
 data class WidgetOptions(
@@ -21,11 +22,12 @@ data class WidgetOptions(
     /** Radar type: minutes after the newest frame, one of [LEADS]. */
     val lead: Int = 0,
     val refresh: RefreshButton = RefreshButton.OFF,
+    val text: TextSize = TextSize.NORMAL,
 ) {
     fun toMap(): Map<String, String> = mapOf(
         "v" to VERSION.toString(), "type" to type.name, "theme" to theme.name, "opacity" to opacity.toString(),
         "units" to units.name, "showChance" to showChance.toString(), "tap" to tap.name, "lead" to lead.toString(),
-        "refresh" to refresh.name)
+        "refresh" to refresh.name, "text" to text.name)
 
     companion object {
         const val VERSION = 1
@@ -48,6 +50,7 @@ data class WidgetOptions(
                 tap = TapAction.entries.firstOrNull { it.name == s("tap") } ?: d.tap,
                 lead = s("lead")?.toIntOrNull()?.takeIf { it in LEADS } ?: d.lead,
                 refresh = RefreshButton.entries.firstOrNull { it.name == s("refresh") } ?: d.refresh,
+                text = TextSize.entries.firstOrNull { it.name == s("text") } ?: d.text,
             )
         }
     }
@@ -92,6 +95,26 @@ object RainWords {
 
     private val now = Regex("""^Raining now, ([\d.,]+) mm/h""")
     private val upTo = Regex("""up to ([\d.,]+) mm/h""")
+
+    private val nbsp = Regex("""(\d) (mm/h|mm|min|minutes|h|hours)\b""")
+    private val chanceAside = Regex(""" \(\d+% chance\)""")
+
+    /**
+     * What a widget prints: [sentence] in the chosen units, the chance in brackets dropped when the widget
+     * shows it big anyway, and numbers glued to their units so "6 h" never breaks across lines.
+     */
+    fun widget(s: String, units: RainUnits, chanceShown: Boolean): String =
+        sentence(s, units).let { if (chanceShown) it.replace(chanceAside, "") else it }.replace(nbsp, "$1\u00A0$2")
+
+    /** For one line on a 2×1: the engine's four sentences (Point.summary) cut to their point. */
+    fun short(s: String): String {
+        Regex("""^Raining now.*stopping in (\d+) min""").find(s)?.let { return "Rain now, stops in ${it.groupValues[1]}\u00A0min" }
+        if (s.startsWith("Raining now")) return "Raining now"
+        Regex("""^Rain starting in (\d+) min""").find(s)?.let { return "Rain in ${it.groupValues[1]}\u00A0min" }
+        if (s.startsWith("Probably dry")) return "Probably dry"
+        Regex("""^Dry for the next (\d+) minutes""").find(s)?.let { return "Dry for ${it.groupValues[1]}\u00A0min" }
+        return s
+    }
 
     fun sentence(s: String, units: RainUnits): String {
         if (units == RainUnits.MMH) return s

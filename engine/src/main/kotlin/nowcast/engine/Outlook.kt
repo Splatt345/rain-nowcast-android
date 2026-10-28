@@ -36,6 +36,15 @@ object OutlookFeatures {
     val NAMES = MODELS + MODELS.map { "${it}_prev_hour" } + MODELS.map { "${it}_next_hour" } +
         listOf("model_mean", "model_max", "sin_hour", "cos_hour", "sin_doy", "cos_doy", "lat", "lon", "lead_bucket")
 
+    /**
+     * The training points' extent (outlook.points(): 7×7 at 48 km around Belgium). lat and lon are
+     * features, so outside it the trees extrapolate: at Amsterdam, all-dry NWP came out as 0.44 mm
+     * at 33 % in every hour. There the ensemble is used instead.
+     */
+    val TRAINED_BBOX = listOf(2.2678, 49.0895, 6.6213, 51.871)
+    fun trainedAt(lat: Double, lon: Double) =
+        lon in TRAINED_BBOX[0]..TRAINED_BBOX[2] && lat in TRAINED_BBOX[1]..TRAINED_BBOX[3]
+
     /** null at the series edges or when any model value is missing (training dropped those rows too). */
     fun row(h: Hourly, j: Int, lat: Double, lon: Double, now: Instant): FloatArray? {
         if (j <= 0 || j >= h.time.size - 1) return null
@@ -209,7 +218,9 @@ object OutlookBars {
 }
 
 /** Fetch and assemble. A failing deterministic fetch or model drops to the ensemble; nothing is invented. */
-fun fetchOutlook(lat: Double, lon: Double, model: OutlookModel?, now: Instant = Instant.now()): Outlook {
+fun fetchOutlook(lat: Double, lon: Double, given: OutlookModel?, now: Instant = Instant.now()): Outlook {
+    val outside = given != null && !OutlookFeatures.trainedAt(lat, lon)
+    val model = given.takeIf { !outside }
     val det = runCatching { OpenMeteo.deterministic(lat, lon) }.getOrNull()
     val first = runCatching { OutlookBars.assemble(det, null, model?.let { m -> m::quantiles }, lat, lon, now) }.getOrNull()
     // the ensemble fills hours the model could not cover (D2 ends near +48 h, a missing value, a failure)
@@ -218,5 +229,7 @@ fun fetchOutlook(lat: Double, lon: Double, model: OutlookModel?, now: Instant = 
     if (complete) return first!!
     val ens = runCatching { OpenMeteo.ensemble(lat, lon) }.getOrNull()
     if (det == null && ens == null) throw OutlookException("Open-Meteo unreachable")
-    return OutlookBars.assemble(det, ens, model?.let { m -> m::quantiles }, lat, lon, now)
+    val o = OutlookBars.assemble(det, ens, model?.let { m -> m::quantiles }, lat, lon, now)
+    return if (outside) Outlook(o.bars, o.fetched, false, "Outside the area the local outlook model was trained on; showing ICON-D2-EPS")
+    else o
 }

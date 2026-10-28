@@ -129,6 +129,8 @@ private fun ConfigScreen(o: WidgetOptions, widget: RainWidgetBase, onChange: (Wi
             Text("Background ${o.opacity}%", style = MaterialTheme.typography.bodyMedium)
             Slider(o.opacity.toFloat(), { onChange(o.copy(opacity = it.toInt())) }, valueRange = 0f..100f, steps = 9,
                 modifier = Modifier.semantics { contentDescription = "Background opacity" })
+            Section("Text size")
+            Choice(TextSize.entries, o.text, { it.label }) { onChange(o.copy(text = it)) }
             Section("Rain as")
             Choice(RainUnits.entries, o.units, { if (it == RainUnits.WORDS) "Light / moderate / heavy" else it.label }) { onChange(o.copy(units = it)) }
             ListItem(headlineContent = { Text("Show chance %") },

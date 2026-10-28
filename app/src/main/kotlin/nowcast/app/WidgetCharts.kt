@@ -52,32 +52,38 @@ private class Masks(wDp: Float, hDp: Float, density: Float) {
 object WidgetCharts {
     private val DAY = DateTimeFormatter.ofPattern("EEE", Locale.ENGLISH)
 
+    /** Axis and day labels: 11.5 dp at full ink, up from 10 dp at 90 %, so they read at arm's length. */
+    const val LABEL_DP = 11.5f
+
     fun niceCeil(v: Double): Double =
         doubleArrayOf(1.0, 2.0, 4.0, 5.0, 10.0, 20.0, 40.0, 50.0, 100.0, 200.0).firstOrNull { it >= v } ?: ceil(v)
 
     /** −30…+60 min around now: P10–P90 band, expected line (past quieter), now marker; axes when there is room. */
-    fun minutes(s: Snapshot, now: Instant, wDp: Float, hDp: Float, density: Float, units: RainUnits, axes: Boolean): List<Layer> {
+    fun minutes(s: Snapshot, now: Instant, wDp: Float, hDp: Float, density: Float, units: RainUnits, axes: Boolean,
+                textScale: Float = 1f): List<Layer> {
         val m = Masks(wDp, hDp, density)
+        val ls = LABEL_DP * textScale
         val age = s.age(now)
         val vis = s.minutes.indices.filter { s.minutes[it] - age in -30..60 }
         val top = vis.maxOfOrNull { maxOf(s.p90[it], s.mean[it]).toDouble() } ?: 0.0
         val yMax = niceCeil(maxOf(1.0, top * 1.15))
-        val left = if (axes) m.dp(if (units == RainUnits.WORDS) 46f else 26f) else m.dp(2f)
+        val left = if (axes) m.dp((if (units == RainUnits.WORDS) 46f else 26f) * ls / 10f) else m.dp(2f)
         val right = m.w - m.dp(4f)
-        val y0 = if (axes) m.dp(13f) else m.dp(3f)
-        val bottom = m.h - if (axes) m.dp(15f) else m.dp(2f)
+        val y0 = if (axes) m.dp(ls + 3f) else m.dp(3f)
+        val bottom = m.h - if (axes) m.dp(ls + 5f) else m.dp(2f)
         fun x(min: Int) = left + (min + 30) / 90f * (right - left)
         fun y(v: Double) = bottom - (v / yMax).toFloat().coerceIn(0f, 1.04f) * (bottom - y0)
 
         val muted = m[Ink.MUTED]
         val grid = m.paint(0.35f, 1f).apply { pathEffect = DashPathEffect(floatArrayOf(m.dp(3f), m.dp(4f)), 0f) }
         muted.drawLine(left, bottom, right, bottom, m.paint(0.5f, 1f))
-        val label = m.text(10f, 0.9f)
+        val label = m.text(ls)
         if (axes) {
             val ticks = if (units == RainUnits.WORDS) listOf(2.5 to "moderate", 10.0 to "heavy").filter { it.first <= yMax }
                 .ifEmpty { listOf(yMax to "light") }
             else listOf(yMax / 2 to fmt(yMax / 2), yMax to "${fmt(yMax)} mm/h")
-            for ((v, t) in ticks) {
+            // big text on a short chart: the labels would sit on each other, keep only the top one
+            for ((v, t) in if (bottom - y0 < m.dp(ls * 3)) ticks.takeLast(1) else ticks) {
                 muted.drawLine(left, y(v), right, y(v), grid)
                 muted.drawText(t, m.dp(1f), y(v) - m.dp(2.5f), label)     // above its line, never across it
             }
@@ -109,19 +115,21 @@ object WidgetCharts {
     }
 
     /** Half-hour bars from now: height = expected mm (square root, so drizzle shows), colour = chance. */
-    fun hours(s: Snapshot, now: Instant, hours: Int, wDp: Float, hDp: Float, density: Float, zone: ZoneId = ZoneId.systemDefault()): List<Layer> {
+    fun hours(s: Snapshot, now: Instant, hours: Int, wDp: Float, hDp: Float, density: Float, textScale: Float = 1f,
+              zone: ZoneId = ZoneId.systemDefault()): List<Layer> {
         val m = Masks(wDp, hDp, density)
+        val ls = LABEL_DP * textScale
         val n = hours * 2
         val t0 = OutlookBars.floor30(now).epochSecond
         val by = s.bars.associateBy { it.start }
         val slots = List(n) { by[t0 + 1800L * it] }
         val yMax = maxOf(1.0, slots.filterNotNull().maxOfOrNull { it.mm.toDouble() } ?: 0.0)
         val days = hDp >= 50f          // a 2×1 has no room for a row of day names
-        val y0 = if (days) m.dp(13f) else m.dp(3f); val bottom = m.h - m.dp(14f)
+        val y0 = if (days) m.dp(ls + 3f) else m.dp(3f); val bottom = m.h - m.dp(ls + 4f)
         val slot = m.w.toFloat() / n
         val bw = (slot * 0.72f).coerceAtLeast(1f)
         val muted = m[Ink.MUTED]; val base = m[Ink.BASE]; val pr = m[Ink.PRIMARY]
-        val label = m.text(10f, 0.9f)
+        val label = m.text(ls)
         muted.drawLine(0f, bottom, m.w.toFloat(), bottom, m.paint(0.5f, 1f))
         val every = if (hours <= 12) 3 else 6
         val solid = m.paint(); val dot = m.paint(0.6f)
@@ -130,7 +138,7 @@ object WidgetCharts {
             val cx = i * slot + slot / 2
             if (days && ((i == 0 && t.hour < 20) || (t.hour == 0 && t.minute == 0))) {
                 if (i > 0) muted.drawLine(i * slot, m.dp(2f), i * slot, bottom, m.paint(0.5f, 1f))
-                muted.drawText(DAY.format(t), i * slot + if (i > 0) m.dp(3f) else 0f, m.dp(10f), label)
+                muted.drawText(DAY.format(t), i * slot + if (i > 0) m.dp(3f) else 0f, m.dp(ls), label)
             }
             if (t.minute == 0 && t.hour % every == 0) {
                 val txt = "%02d".format(t.hour); val tw = label.measureText(txt)

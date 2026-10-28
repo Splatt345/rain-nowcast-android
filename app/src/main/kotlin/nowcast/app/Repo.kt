@@ -77,6 +77,7 @@ class Repo(private val ctx: Context) {
 
     /** Run a cycle for the region containing home (or [at], a map tap elsewhere). */
     suspend fun refresh(force: Boolean = false, at: Pair<Double, Double>? = null) = lock.withLock {
+        if (at == null) follow()
         val s = prefs.value
         val key = secrets.get(SOURCE_OPERA)
         if (key == null && !demo) { flow.update { it.copy(problem = Problem.NoKey, loading = false) }; return@withLock }
@@ -89,7 +90,10 @@ class Repo(private val ctx: Context) {
                 else RadarSource(key, File(ctx.cacheDir, "radar")).run { prune(); latestFrames(region) }
             }
             val old = flow.value.forecast
-            val fc = if (old != null && Cycle.skip(frames.last().time, old.issued, old.region == region, force)) old
+            val reuse = old != null && Cycle.skip(frames.last().time, old.issued, old.region == region, force)
+            // another region: let go of the old ensemble first, two of them do not fit a 192 MB heap
+            if (!reuse && old != null && old.region != region) flow.update { it.copy(forecast = null) }
+            val fc = if (reuse) old!!
             else withContext(Dispatchers.Default) { Nowcaster(if (s.useModel) model(region) else null).run(region, frames) }
             if (fc.modelError != null && modelBroken == null) modelBroken = fc.modelError
             val note = when {
@@ -126,6 +130,7 @@ class Repo(private val ctx: Context) {
      * time). Returns the home point and its issue time; null when there was nothing new or it failed.
      */
     suspend fun refreshPoint(force: Boolean = false): Pair<PointForecast, Instant>? = lock.withLock {
+        follow()
         val s = prefs.value
         val key = secrets.get(SOURCE_OPERA)
         if (key == null && !demo) return@withLock null
@@ -191,8 +196,17 @@ class Repo(private val ctx: Context) {
         return withContext(Dispatchers.Default) { now.point(lat, lon) }
     }
 
-    suspend fun setHome(lat: Double, lon: Double) {
-        prefs.update { it.copy(homeLat = lat, homeLon = lon) }
+    /** Following: home is where the phone is, checked before every cycle. Without a fix, home stays put. */
+    private suspend fun follow() {
+        if (!prefs.value.followLocation) return
+        val l = Locator.fix(ctx) ?: return
+        if (Locator.moved(prefs.value.home, l.latitude, l.longitude))
+            prefs.update { it.copy(homeLat = l.latitude, homeLon = l.longitude) }
+    }
+
+    /** [manual]: picked on the map or by hand, which stops following; a live fix keeps it on. */
+    suspend fun setHome(lat: Double, lon: Double, manual: Boolean = true) {
+        prefs.update { it.copy(homeLat = lat, homeLon = lon, followLocation = it.followLocation && !manual) }
         val fc = flow.value.forecast
         if (fc != null && fc.region.contains(lat, lon))
             flow.update { it.copy(point = fc.point(lat, lon)) }

@@ -94,6 +94,16 @@ private fun Main(repo: Repo, asked: MutableState<Tab?>) {
             while (true) { repo.kick(); delay(5 * 60_000L) }
         }
     }
+    // following: live fixes while visible; each one that moved home re-points the forecast
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    LaunchedEffect(lifecycle, settings.followLocation) {
+        if (!settings.followLocation) return@LaunchedEffect
+        lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
+            Locator.updates(ctx).collect { l ->
+                if (Locator.moved(repo.prefs.value.home, l.latitude, l.longitude)) repo.setHome(l.latitude, l.longitude, manual = false)
+            }
+        }
+    }
     var now by remember { mutableStateOf(Instant.now()) }
     LaunchedEffect(Unit) { while (true) { delay(20_000); now = Instant.now() } }
 

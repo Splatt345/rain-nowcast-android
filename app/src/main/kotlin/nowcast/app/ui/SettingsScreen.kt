@@ -42,6 +42,8 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import nowcast.app.BuildConfig
+import nowcast.app.Locator
+import androidx.lifecycle.compose.LifecycleResumeEffect
 import nowcast.app.RefreshWorker
 import nowcast.app.Repo
 import nowcast.app.Settings
@@ -74,9 +76,30 @@ private fun Main(repo: Repo, openRegions: () -> Unit, modifier: Modifier) {
     fun update(f: (Settings) -> Settings) = repo.prefs.update(f)
     val locPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
         if (ok) { locating = "Locating…"; oneFix(ctx) { loc -> locating = if (loc == null) "No location fix" else null
-            loc?.let { scope.launch { repo.setHome(it.latitude, it.longitude) } } } }
+            loc?.let { scope.launch { repo.setHome(it.latitude, it.longitude, manual = false) } } } }
         else locating = "Location permission denied"
     }
+    // following: foreground permission first, then (Android 10+) "Allow all the time" for widgets and alerts
+    var background by remember { mutableStateOf(Locator.canInBackground(ctx)) }
+    LifecycleResumeEffect(Unit) { background = Locator.canInBackground(ctx); onPauseOrDispose { } }
+    val bgPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { background = it }
+    var whyBackground by remember { mutableStateOf(false) }
+    // Android wants the reason before its "all the time" page, which it opens instead of a dialog
+    fun askBackground() { if (Build.VERSION.SDK_INT >= 29) whyBackground = true }
+    var precise by remember { mutableStateOf(Locator.isPrecise(ctx)) }
+    LifecycleResumeEffect(Unit) { precise = Locator.isPrecise(ctx); onPauseOrDispose { } }
+    // precise and approximate in one request: Android shows the choice, either one is enough to follow
+    val followPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { r ->
+        precise = Locator.isPrecise(ctx)
+        if (r.values.any { it }) { update { it.copy(followLocation = true) }; repo.kick(); if (!background) askBackground() }
+        else locating = "Location permission denied"
+    }
+    if (whyBackground) AlertDialog({ whyBackground = false }, title = { Text("Follow you in the background?") },
+        text = { Text("Widgets and rain alerts refresh every 15 minutes while the app is closed. To use where you are " +
+            "then, Android needs location \"Allow all the time\". The app reads one fix per refresh and keeps no history.") },
+        confirmButton = { TextButton({ whyBackground = false
+            if (Build.VERSION.SDK_INT >= 29) bgPermission.launch(Manifest.permission.ACCESS_BACKGROUND_LOCATION) }) { Text("Continue") } },
+        dismissButton = { TextButton({ whyBackground = false }) { Text("Only while open") } })
 
     Column(modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 16.dp).padding(bottom = 24.dp)
         .widthIn(max = 720.dp)) {
@@ -93,9 +116,28 @@ private fun Main(repo: Repo, openRegions: () -> Unit, modifier: Modifier) {
         Section("Place")
         Group {
             val (lat, lon) = s.home
-            Item(Icons.Outlined.Home, "Home", (if (s.homeLat == null) "Default (Brussels) · " else "") +
-                "%.3f, %.3f".format(java.util.Locale.ROOT, lat, lon) + " · tap a place on the map to change", onClick = null)
-            Item(Icons.Outlined.MyLocation, "Use my location", locating ?: "One-off fix, not tracked") {
+            val where = "%.3f, %.3f".format(java.util.Locale.ROOT, lat, lon)
+            Item(Icons.Outlined.Home, "Home", when {
+                s.followLocation -> "Your location · $where"
+                s.homeLat == null -> "Default (Brussels) · $where · tap a place on the map to change"
+                else -> "$where · tap a place on the map to change"
+            }, onClick = null)
+            Toggle(Icons.Outlined.NearMe, "Follow my location", when {
+                !s.followLocation -> "Home moves with you"
+                !precise -> "Approximate location: Android updates it every 10 min at most" +
+                    if (background) "" else "; only while the app is open"
+                background -> "Live while the app is open, at each refresh in the background"
+                else -> "Live while the app is open; widgets and alerts use the last place"
+            }, s.followLocation) { on ->
+                if (!on) update { it.copy(followLocation = false) }
+                else if (Locator.canLocate(ctx)) { update { it.copy(followLocation = true) }; repo.kick(); if (!background) askBackground() }
+                else followPermission.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
+            }
+            if (s.followLocation && !background)
+                Item(Icons.Outlined.LocationOn, "Follow in the background too", "Allow location \"all the time\" so widgets and alerts move with you") {
+                    askBackground()
+                }
+            if (!s.followLocation) Item(Icons.Outlined.MyLocation, "Use my location once", locating ?: "One fix now, not tracked") {
                 locPermission.launch(Manifest.permission.ACCESS_COARSE_LOCATION)
             }
             var regionMenu by remember { mutableStateOf(false) }
