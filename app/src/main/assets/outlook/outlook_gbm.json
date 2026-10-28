@@ -1,4 +1,17 @@
 {
+ "region": "belgium",
+ "models": [
+  "icon_d2",
+  "icon_eu",
+  "ecmwf_ifs025"
+ ],
+ "ensemble": "icon_d2",
+ "trained_bbox": [
+  2.2678,
+  49.0895,
+  6.6213,
+  51.871
+ ],
  "features": [
   "icon_d2",
   "icon_eu",

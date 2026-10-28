@@ -198,8 +198,9 @@ private fun OutlookCard(state: UiState, now: Instant, zone: ZoneId) {
             val o = state.outlook
             val src = when {
                 o == null -> ""
-                o.usedModel -> "First hour from radar, then the local model on ICON-D2, ICON-EU and IFS"
-                else -> "First hour from radar, then ICON-D2-EPS (20 members)"
+                o.usedModel -> "First hour from radar, then the local model on " +
+                    o.meta.modelNames.let { n -> if (n.size > 1) n.dropLast(1).joinToString(", ") + " and " + n.last() else n.joinToString() }
+                else -> "First hour from radar, then ${o.meta.ensembleName}"
             }
             if (src.isNotEmpty()) Text(src + " · fetched ${HM.format(o!!.fetched.atZone(zone))}",
                 style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)

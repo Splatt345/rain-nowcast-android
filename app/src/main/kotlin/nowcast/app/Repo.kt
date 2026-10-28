@@ -60,7 +60,12 @@ class Repo(private val ctx: Context) {
 
     private var modelBroken: String? = null           // a failed model is not retried until restart
     private var smaat: Pair<String, SmaatModel>? = null
-    private val outlookModel by lazy { runCatching { OutlookModel(ctx.assets.open("outlook/outlook_gbm.onnx").readBytes()) }.getOrNull() }
+    private val outlookModel by lazy {
+        runCatching {
+            OutlookModel(ctx.assets.open("outlook/outlook_gbm.onnx").readBytes(),
+                OutlookMeta.parse(ctx.assets.open("outlook/outlook_gbm.json").bufferedReader().readText()))
+        }.getOrNull()
+    }
     private var outlookAt: Pair<Double, Double>? = null
 
     val demo: Boolean get() = BuildConfig.DEBUG && prefs.value.demo

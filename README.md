@@ -7,6 +7,10 @@ Forked from `local_weather_model`, which is the research side of this:
 figuring out *which* nowcasting method actually works and measuring how well.
 This repo is that method packaged as something you can click on.
 
+The bundled models are trained on Belgium. To train them for another region
+and load them into the Android app, follow `docs/TRAIN_YOUR_REGION.md` in
+`local_weather_model`; it starts with `python -m nowcast.region --init`.
+
 - **Radar view** — the last hour of real radar, animated, on a real map, plus
   the next hour extrapolated forward. Scrub or let it loop, pick a colour
   scheme, and click anywhere on the map to forecast that spot instead.

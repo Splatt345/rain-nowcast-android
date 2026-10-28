@@ -35,7 +35,8 @@ class OutlookTest {
 
     @Test fun featureNamesAreTheExportedContract() {
         val j = Json.parseToJsonElement(File(assets, "outlook_gbm.json").readText()).jsonObject
-        assertEquals(j["features"]!!.jsonArray.map { it.jsonPrimitive.content }, OutlookFeatures.NAMES)
+        val meta = OutlookMeta.parse(File(assets, "outlook_gbm.json").readText())
+        assertEquals(j["features"]!!.jsonArray.map { it.jsonPrimitive.content }, OutlookFeatures.names(meta.models))
     }
 
     @Test fun quantilesBecomeTwoHalfHourBars() {
@@ -117,8 +118,21 @@ class OutlookTest {
     }
 
     @Test fun modelOnlyWhereItWasTrained() {
-        assertTrue(OutlookFeatures.trainedAt(50.85, 4.35))       // Brussels
-        assertFalse(OutlookFeatures.trainedAt(52.37, 4.90))      // Amsterdam: north of every training point
-        assertFalse(OutlookFeatures.trainedAt(51.0, 7.0))        // Cologne side
+        val be = OutlookMeta.parse(File(assets, "outlook_gbm.json").readText())
+        assertTrue(be.trainedAt(50.85, 4.35))       // Brussels
+        assertFalse(be.trainedAt(52.37, 4.90))      // Amsterdam: north of every training point
+        assertFalse(be.trainedAt(51.0, 7.0))        // Cologne side
+    }
+
+    @Test fun anotherRegionsModelBringsItsOwnModelsAndArea() {
+        val m = OutlookMeta.parse("""{"models":["meteofrance_arome_france","icon_eu","ecmwf_ifs025"],
+            "ensemble":"icon_eu","trained_bbox":[-6.2,38.5,-1.2,42.3],"features":[]}""")
+        assertTrue(m.trainedAt(40.4, -3.7)); assertFalse(m.trainedAt(50.85, 4.35))
+        assertEquals("the ICON-EU ensemble", m.ensembleName)
+        assertEquals(listOf("AROME", "ICON-EU", "IFS"), m.modelNames)
+        val h = Hourly(det.time, mapOf("meteofrance_arome_france" to det.series.getValue("icon_d2"),
+            "icon_eu" to det.series.getValue("icon_eu"), "ecmwf_ifs025" to det.series.getValue("ecmwf_ifs025")))
+        assertArrayEquals(OutlookFeatures.row(det, 4, 50.85, 4.35, now), OutlookFeatures.row(h, 4, 50.85, 4.35, now, m.models), 0f)
+        assertNull(OutlookFeatures.row(det, 4, 50.85, 4.35, now, m.models))     // AROME missing from the fetch
     }
 }

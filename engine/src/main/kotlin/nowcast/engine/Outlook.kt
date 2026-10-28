@@ -14,7 +14,7 @@ import kotlin.math.PI
 import kotlin.math.cos
 import kotlin.math.sin
 
-/** The 48 h outlook: Open-Meteo deterministic runs through the local GBM, ICON-D2-EPS as fallback. */
+/** The 48 h outlook: Open-Meteo deterministic runs through the local GBM, an ensemble (ICON-D2-EPS) as fallback. */
 class OutlookException(msg: String) : Exception(msg)
 
 enum class BarSource { NOWCAST, MODEL, ENSEMBLE }
@@ -28,28 +28,51 @@ class Bar(val start: Instant, val mm: Double, val p10: Double, val p90: Double, 
 /** Hourly series. time[i] is the END of the hour the value covers (Open-Meteo "preceding hour"); NaN = missing. */
 class Hourly(val time: List<Instant>, val series: Map<String, DoubleArray>)
 
-class Outlook(val bars: List<Bar>, val fetched: Instant, val usedModel: Boolean, val note: String?)
+class Outlook(val bars: List<Bar>, val fetched: Instant, val usedModel: Boolean, val note: String?,
+              val meta: OutlookMeta = OutlookMeta.BELGIUM)
+
+/**
+ * What outlook_gbm.json says about its model (research nowcast/outlook_export.py): the Open-Meteo
+ * models it reads, the ensemble that fills in, and the extent of its training points. lat and lon
+ * are features, so outside that extent the trees extrapolate: at Amsterdam the Belgian model turned
+ * all-dry NWP into 0.44 mm at 33 % in every hour. There the ensemble is used instead.
+ */
+class OutlookMeta(val models: List<String>, val ensemble: String, val trainedBbox: List<Double>) {
+    fun trainedAt(lat: Double, lon: Double) =
+        lon in trainedBbox[0]..trainedBbox[2] && lat in trainedBbox[1]..trainedBbox[3]
+
+    val modelNames get() = models.map { NAMES[it] ?: it }
+    val ensembleName get() = if (ensemble == "icon_d2") "ICON-D2-EPS" else "the ${NAMES[ensemble] ?: ensemble} ensemble"
+
+    companion object {
+        private val NAMES = mapOf("icon_d2" to "ICON-D2", "icon_eu" to "ICON-EU", "ecmwf_ifs025" to "IFS",
+            "meteofrance_arome_france" to "AROME", "gfs_global" to "GFS", "gfs025" to "GFS", "icon_global" to "ICON")
+        /** The bundled model: 7×7 points 48 km apart around Belgium. */
+        val BELGIUM = OutlookMeta(listOf("icon_d2", "icon_eu", "ecmwf_ifs025"), "icon_d2",
+            listOf(2.2678, 49.0895, 6.6213, 51.871))
+
+        /** Files exported before these keys existed are the Belgian model. */
+        fun parse(json: String): OutlookMeta {
+            val o = Json.parseToJsonElement(json).jsonObject
+            return OutlookMeta(
+                o["models"]?.jsonArray?.map { it.jsonPrimitive.content } ?: BELGIUM.models,
+                o["ensemble"]?.jsonPrimitive?.contentOrNull ?: BELGIUM.ensemble,
+                o["trained_bbox"]?.jsonArray?.map { it.jsonPrimitive.double } ?: BELGIUM.trainedBbox)
+        }
+    }
+}
 
 /** The feature row of outlook_train.assemble, in outlook_gbm.json order. */
 object OutlookFeatures {
-    val MODELS = listOf("icon_d2", "icon_eu", "ecmwf_ifs025")
-    val NAMES = MODELS + MODELS.map { "${it}_prev_hour" } + MODELS.map { "${it}_next_hour" } +
+    fun names(models: List<String>) = models + models.map { "${it}_prev_hour" } + models.map { "${it}_next_hour" } +
         listOf("model_mean", "model_max", "sin_hour", "cos_hour", "sin_doy", "cos_doy", "lat", "lon", "lead_bucket")
 
-    /**
-     * The training points' extent (outlook.points(): 7×7 at 48 km around Belgium). lat and lon are
-     * features, so outside it the trees extrapolate: at Amsterdam, all-dry NWP came out as 0.44 mm
-     * at 33 % in every hour. There the ensemble is used instead.
-     */
-    val TRAINED_BBOX = listOf(2.2678, 49.0895, 6.6213, 51.871)
-    fun trainedAt(lat: Double, lon: Double) =
-        lon in TRAINED_BBOX[0]..TRAINED_BBOX[2] && lat in TRAINED_BBOX[1]..TRAINED_BBOX[3]
-
     /** null at the series edges or when any model value is missing (training dropped those rows too). */
-    fun row(h: Hourly, j: Int, lat: Double, lon: Double, now: Instant): FloatArray? {
+    fun row(h: Hourly, j: Int, lat: Double, lon: Double, now: Instant,
+            models: List<String> = OutlookMeta.BELGIUM.models): FloatArray? {
         if (j <= 0 || j >= h.time.size - 1) return null
         // the trainer holds model values as float32
-        fun at(k: Int) = MODELS.map { h.series[it]?.get(k)?.toFloat()?.toDouble() ?: Double.NaN }
+        fun at(k: Int) = models.map { h.series[it]?.get(k)?.toFloat()?.toDouble() ?: Double.NaN }
         val m = at(j); val prev = at(j - 1); val next = at(j + 1)
         if ((m + prev + next).any { !it.isFinite() }) return null
         val t = h.time[j].atOffset(ZoneOffset.UTC)
@@ -62,8 +85,8 @@ object OutlookFeatures {
     }
 }
 
-/** outlook_gbm.onnx: input "x" (n, 18), output "quantiles" (n, 9); sorted and clipped like predict_gbm. */
-class OutlookModel(bytes: ByteArray) : AutoCloseable {
+/** outlook_gbm.onnx: input "x" (n, 3 × models + 9), output "quantiles" (n, 9); sorted and clipped like predict_gbm. */
+class OutlookModel(bytes: ByteArray, val meta: OutlookMeta = OutlookMeta.BELGIUM) : AutoCloseable {
     private val env = OrtEnvironment.getEnvironment()
     private val session: OrtSession = env.createSession(bytes, OrtSession.SessionOptions())
 
@@ -110,12 +133,12 @@ object OpenMeteo {
 
     private fun q(lat: Double, lon: Double) = "latitude=%.4f&longitude=%.4f".format(Locale.ROOT, lat, lon)
 
-    fun deterministic(lat: Double, lon: Double): Hourly = parse(get("$DET?${q(lat, lon)}&hourly=precipitation" +
-        "&models=${OutlookFeatures.MODELS.joinToString(",")}&timezone=GMT&past_days=1&forecast_days=3"))
+    fun deterministic(lat: Double, lon: Double, models: List<String>): Hourly = parse(get("$DET?${q(lat, lon)}" +
+        "&hourly=precipitation&models=${models.joinToString(",")}&timezone=GMT&past_days=1&forecast_days=3"))
 
-    /** ICON-D2-EPS: control + 19 members. */
-    fun ensemble(lat: Double, lon: Double): Hourly =
-        parse(get("$ENS?${q(lat, lon)}&hourly=precipitation&models=icon_d2&timezone=GMT&forecast_days=3"))
+    /** Every member, e.g. ICON-D2-EPS: control + 19. */
+    fun ensemble(lat: Double, lon: Double, model: String): Hourly =
+        parse(get("$ENS?${q(lat, lon)}&hourly=precipitation&models=$model&timezone=GMT&forecast_days=3"))
 }
 
 object OutlookBars {
@@ -143,31 +166,31 @@ object OutlookBars {
     }
 
     fun assemble(det: Hourly?, ens: Hourly?, model: ((List<FloatArray>) -> List<DoubleArray>)?,
-                 lat: Double, lon: Double, now: Instant): Outlook {
+                 lat: Double, lon: Double, now: Instant, meta: OutlookMeta = OutlookMeta.BELGIUM): Outlook {
         val lo = floor30(now); val hi = lo.plusSeconds(HALF * (N + 2))
         fun inWindow(t: Instant) = t > lo && t <= hi
         val byHour = sortedMapOf<Instant, List<Bar>>()
         var note: String? = null
         if (det != null && model != null) {
             val js = det.time.indices.filter { inWindow(det.time[it]) }
-                .mapNotNull { j -> OutlookFeatures.row(det, j, lat, lon, now)?.let { j to it } }
+                .mapNotNull { j -> OutlookFeatures.row(det, j, lat, lon, now, meta.models)?.let { j to it } }
             try {
                 if (js.isNotEmpty()) model(js.map { it.second }).forEachIndexed { i, q ->
                     val end = det.time[js[i].first]; byHour[end] = fromQuantiles(end, q)
                 }
             } catch (e: Exception) {
-                note = "Local outlook model failed (${e.message}); showing ICON-D2-EPS"
+                note = "Local outlook model failed (${e.message}); showing ${meta.ensembleName}"
             }
         }
         val usedModel = byHour.isNotEmpty()
-        if (!usedModel && note == null) note = "Local outlook model unavailable; showing ICON-D2-EPS"
+        if (!usedModel && note == null) note = "Local outlook model unavailable; showing ${meta.ensembleName}"
         if (ens != null) for ((j, end) in ens.time.withIndex()) {
             if (!inWindow(end) || end in byHour) continue
             val b = fromMembers(end, ens.series.values.map { it[j] }.toDoubleArray())
             if (b.isNotEmpty()) byHour[end] = b
         }
         if (byHour.isEmpty()) throw OutlookException("No outlook data for this place")
-        return Outlook(byHour.values.flatten(), now, usedModel, note)
+        return Outlook(byHour.values.flatten(), now, usedModel, note, meta)
     }
 
     /** Nowcast for every bar its point curve fully covers (~ the first hour), the outlook after: a switch, not a blend. */
@@ -219,17 +242,19 @@ object OutlookBars {
 
 /** Fetch and assemble. A failing deterministic fetch or model drops to the ensemble; nothing is invented. */
 fun fetchOutlook(lat: Double, lon: Double, given: OutlookModel?, now: Instant = Instant.now()): Outlook {
-    val outside = given != null && !OutlookFeatures.trainedAt(lat, lon)
+    val meta = given?.meta ?: OutlookMeta.BELGIUM
+    val outside = given != null && !meta.trainedAt(lat, lon)
     val model = given.takeIf { !outside }
-    val det = runCatching { OpenMeteo.deterministic(lat, lon) }.getOrNull()
-    val first = runCatching { OutlookBars.assemble(det, null, model?.let { m -> m::quantiles }, lat, lon, now) }.getOrNull()
+    val det = runCatching { OpenMeteo.deterministic(lat, lon, meta.models) }.getOrNull()
+    val first = runCatching { OutlookBars.assemble(det, null, model?.let { m -> m::quantiles }, lat, lon, now, meta) }.getOrNull()
     // the ensemble fills hours the model could not cover (D2 ends near +48 h, a missing value, a failure)
     val complete = first != null && first.usedModel &&
         first.bars.last().end >= OutlookBars.floor30(now).plusSeconds(1800L * OutlookBars.N)
     if (complete) return first!!
-    val ens = runCatching { OpenMeteo.ensemble(lat, lon) }.getOrNull()
+    val ens = runCatching { OpenMeteo.ensemble(lat, lon, meta.ensemble) }.getOrNull()
     if (det == null && ens == null) throw OutlookException("Open-Meteo unreachable")
-    val o = OutlookBars.assemble(det, ens, model?.let { m -> m::quantiles }, lat, lon, now)
-    return if (outside) Outlook(o.bars, o.fetched, false, "Outside the area the local outlook model was trained on; showing ICON-D2-EPS")
+    val o = OutlookBars.assemble(det, ens, model?.let { m -> m::quantiles }, lat, lon, now, meta)
+    return if (outside) Outlook(o.bars, o.fetched, false,
+        "Outside the area the local outlook model was trained on; showing ${meta.ensembleName}", meta)
     else o
 }
