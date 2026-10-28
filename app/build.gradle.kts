@@ -1,16 +1,8 @@
-import java.util.Properties
-
 plugins {
     id("com.android.application")
     kotlin("plugin.compose")
     kotlin("plugin.serialization")
 }
-// The Play upload key lives outside the repo; -Pnowcast.signing=<file> points elsewhere.
-val signingProps = Properties().apply {
-    val f = file((findProperty("nowcast.signing") as String?) ?: "${System.getProperty("user.home")}/.android-keys/rain-nowcast/keystore.properties")
-    if (f.exists()) f.inputStream().use { load(it) }
-}
-
 android {
     namespace = "nowcast.app"
     compileSdk = 36
@@ -27,21 +19,11 @@ android {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-    signingConfigs {
-        if (!signingProps.isEmpty) create("upload") {
-            storeFile = file(signingProps.getProperty("storeFile"))
-            storePassword = signingProps.getProperty("storePassword")
-            keyAlias = signingProps.getProperty("keyAlias")
-            keyPassword = signingProps.getProperty("keyPassword")
-        }
-    }
     buildTypes {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            // without the upload key (another machine, F-Droid's build server, which signs itself) it is unsigned
-            signingConfig = signingConfigs.findByName("upload")
         }
     }
     buildFeatures { compose = true; buildConfig = true }

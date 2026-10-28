@@ -20,14 +20,14 @@ Every five minutes the app takes the last hour of EUMETNET OPERA radar, estimate
 ### Widgets
 
 <p>
-<img src="play/screenshots/widgets/summary-medium.png" width="300" alt="Summary widget">
-<img src="play/screenshots/widgets/minutes-medium.png" width="300" alt="Next-hour widget">
-<img src="play/screenshots/widgets/hours-medium.png" width="300" alt="48-hour widget">
-<img src="play/screenshots/widgets/radar-medium.png" width="300" alt="Radar widget, medium">
+<img src="screenshots/widgets/summary-medium.png" width="300" alt="Summary widget">
+<img src="screenshots/widgets/minutes-medium.png" width="300" alt="Next-hour widget">
+<img src="screenshots/widgets/hours-medium.png" width="300" alt="48-hour widget">
+<img src="screenshots/widgets/radar-medium.png" width="300" alt="Radar widget, medium">
 </p>
 <p>
-<img src="play/screenshots/widgets/radar-large.png" width="300" alt="Radar widget, large">
-<img src="play/screenshots/widgets/combined-large.png" width="300" alt="Combined widget">
+<img src="screenshots/widgets/radar-large.png" width="300" alt="Radar widget, large">
+<img src="screenshots/widgets/combined-large.png" width="300" alt="Combined widget">
 </p>
 
 The screenshots show a real rainy hour of OPERA radar (3 May 2026), replayed.
@@ -43,7 +43,7 @@ Needs JDK 17 and the Android SDK (compileSdk 36).
 ```bash
 ./gradlew :app:assembleDebug                 # app/build/outputs/apk/debug/app-debug.apk
 ./gradlew :engine:test :app:testDebugUnitTest
-./gradlew :app:bundleRelease                 # for Google Play; see play/README.md for signing
+./gradlew :app:assembleRelease               # unsigned; F-Droid builds and signs its own
 ```
 
 **Emulators without Vulkan:** the map uses MapLibre's Vulkan build. For an emulator that has no Vulkan, swap `org.maplibre.gl:android-sdk` for `org.maplibre.gl:android-sdk-opengl` (same version) in `app/build.gradle.kts` for that build only.
@@ -54,7 +54,7 @@ Needs JDK 17 and the Android SDK (compileSdk 36).
 |---|---|
 | `engine/` | Pure Kotlin/JVM: radar reading (ODIM HDF5), optical flow, the STEPS ensemble, FFT, the ONNX models, point forecasts, rendering. Unit-tested against the Python reference |
 | `app/` | The Android app: Compose UI, MapLibre map, WorkManager refresh, Glance widgets |
-| `play/` | Google Play listing, graphics, privacy policy and Console answers |
+| `screenshots/` | Widget screenshots for this README |
 | `fastlane/` | Store metadata in the layout F-Droid reads |
 | `fdroid/` | Draft F-Droid build metadata |
 

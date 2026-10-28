@@ -1,6 +1,0 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="18 18 72 72">
-  <!-- the launcher icon's safe zone (central 72 of 108 dp), on its background colour -->
-  <rect x="18" y="18" width="72" height="72" fill="#1F5FA8"/>
-  <path fill="#FFFFFF" fill-opacity="0.95" d="M54,30C54,30 39,46.5 39,57.5A15,15 0,0 0,69 57.5C69,46.5 54,30 54,30Z"/>
-  <path fill="#9CC7FF" d="M36,74h36a2.5,2.5 0,0 1,0 5h-36a2.5,2.5 0,0 1,0 -5z"/>
-</svg>

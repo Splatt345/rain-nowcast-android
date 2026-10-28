@@ -103,7 +103,7 @@ private fun Main(repo: Repo, openRegions: () -> Unit, openGuide: () -> Unit, mod
         else locating = "Location permission denied"
     }
     if (whyBackground) AlertDialog({ whyBackground = false }, title = { Text("Follow you in the background?") },
-        // Play's prominent disclosure: what is collected, that it happens when closed, why, and who gets it
+        // before asking: what is collected, that it happens when closed, why, and who gets it
         text = { Text("Rain Nowcast collects your location to update widgets and rain alerts for where you are, " +
             "even when the app is closed or not in use. It reads one fix per refresh (every 15 minutes) and keeps no history. " +
             "The radar for the area around you is downloaded from MeteoGate, and your coordinates go to Open-Meteo for the forecast. " +
