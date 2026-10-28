@@ -89,36 +89,36 @@ val Overline: TextStyle
  */
 fun seedScheme(seed: Int, dark: Boolean): ColorScheme {
     val hsl = FloatArray(3).also { ColorUtils.colorToHSL(seed or 0xFF000000.toInt(), it) }
-    val h = hsl[0]; val sat = hsl[1].coerceAtLeast(0.15f)
-    fun t(l: Float, s: Float = sat, dh: Float = 0f) = Color(ColorUtils.HSLToColor(floatArrayOf((h + dh + 360f) % 360f, s.coerceIn(0f, 1f), l)))
-    val s2 = sat * 0.5f; val n = minOf(sat * 0.2f, 0.16f)
+    val hue = hsl[0]; val seedSat = hsl[1].coerceAtLeast(0.15f)
+    fun tone(lightness: Float, saturation: Float = seedSat, hueShift: Float = 0f) = Color(ColorUtils.HSLToColor(floatArrayOf((hue + hueShift + 360f) % 360f, saturation.coerceIn(0f, 1f), lightness)))
+    val mutedSat = seedSat * 0.5f; val neutralSat = minOf(seedSat * 0.2f, 0.16f)
     return if (!dark) AppLight.copy(
-        primary = t(0.40f), onPrimary = Color.White, primaryContainer = t(0.90f), onPrimaryContainer = t(0.12f),
-        inversePrimary = t(0.80f), surfaceTint = t(0.40f),
-        secondary = t(0.36f, s2, 30f), onSecondary = Color.White, secondaryContainer = t(0.90f, s2, 30f), onSecondaryContainer = t(0.12f, s2, 30f),
-        tertiary = t(0.40f, sat, 70f), onTertiary = Color.White, tertiaryContainer = t(0.90f, sat, 70f), onTertiaryContainer = t(0.12f, sat, 70f),
-        background = t(0.975f, n), onBackground = t(0.10f, n), surface = t(0.975f, n), onSurface = t(0.10f, n),
-        surfaceVariant = t(0.90f, n), onSurfaceVariant = t(0.32f, n),
-        surfaceContainerLowest = Color.White, surfaceContainerLow = t(0.955f, n), surfaceContainer = t(0.935f, n),
-        surfaceContainerHigh = t(0.915f, n), surfaceContainerHighest = t(0.895f, n),
-        outline = t(0.50f, n), outlineVariant = t(0.80f, n),
+        primary = tone(0.40f), onPrimary = Color.White, primaryContainer = tone(0.90f), onPrimaryContainer = tone(0.12f),
+        inversePrimary = tone(0.80f), surfaceTint = tone(0.40f),
+        secondary = tone(0.36f, mutedSat, 30f), onSecondary = Color.White, secondaryContainer = tone(0.90f, mutedSat, 30f), onSecondaryContainer = tone(0.12f, mutedSat, 30f),
+        tertiary = tone(0.40f, seedSat, 70f), onTertiary = Color.White, tertiaryContainer = tone(0.90f, seedSat, 70f), onTertiaryContainer = tone(0.12f, seedSat, 70f),
+        background = tone(0.975f, neutralSat), onBackground = tone(0.10f, neutralSat), surface = tone(0.975f, neutralSat), onSurface = tone(0.10f, neutralSat),
+        surfaceVariant = tone(0.90f, neutralSat), onSurfaceVariant = tone(0.32f, neutralSat),
+        surfaceContainerLowest = Color.White, surfaceContainerLow = tone(0.955f, neutralSat), surfaceContainer = tone(0.935f, neutralSat),
+        surfaceContainerHigh = tone(0.915f, neutralSat), surfaceContainerHighest = tone(0.895f, neutralSat),
+        outline = tone(0.50f, neutralSat), outlineVariant = tone(0.80f, neutralSat),
     ) else AppDark.copy(
-        primary = t(0.80f), onPrimary = t(0.20f), primaryContainer = t(0.30f), onPrimaryContainer = t(0.90f),
-        inversePrimary = t(0.40f), surfaceTint = t(0.80f),
-        secondary = t(0.78f, s2, 30f), onSecondary = t(0.18f, s2, 30f), secondaryContainer = t(0.28f, s2, 30f), onSecondaryContainer = t(0.90f, s2, 30f),
-        tertiary = t(0.80f, sat, 70f), onTertiary = t(0.20f, sat, 70f), tertiaryContainer = t(0.30f, sat, 70f), onTertiaryContainer = t(0.90f, sat, 70f),
-        background = t(0.06f, n), onBackground = t(0.90f, n), surface = t(0.06f, n), onSurface = t(0.90f, n),
-        surfaceVariant = t(0.20f, n), onSurfaceVariant = t(0.75f, n),
-        surfaceContainerLowest = t(0.04f, n), surfaceContainerLow = t(0.09f, n), surfaceContainer = t(0.11f, n),
-        surfaceContainerHigh = t(0.14f, n), surfaceContainerHighest = t(0.18f, n),
-        outline = t(0.58f, n), outlineVariant = t(0.28f, n),
+        primary = tone(0.80f), onPrimary = tone(0.20f), primaryContainer = tone(0.30f), onPrimaryContainer = tone(0.90f),
+        inversePrimary = tone(0.40f), surfaceTint = tone(0.80f),
+        secondary = tone(0.78f, mutedSat, 30f), onSecondary = tone(0.18f, mutedSat, 30f), secondaryContainer = tone(0.28f, mutedSat, 30f), onSecondaryContainer = tone(0.90f, mutedSat, 30f),
+        tertiary = tone(0.80f, seedSat, 70f), onTertiary = tone(0.20f, seedSat, 70f), tertiaryContainer = tone(0.30f, seedSat, 70f), onTertiaryContainer = tone(0.90f, seedSat, 70f),
+        background = tone(0.06f, neutralSat), onBackground = tone(0.90f, neutralSat), surface = tone(0.06f, neutralSat), onSurface = tone(0.90f, neutralSat),
+        surfaceVariant = tone(0.20f, neutralSat), onSurfaceVariant = tone(0.75f, neutralSat),
+        surfaceContainerLowest = tone(0.04f, neutralSat), surfaceContainerLow = tone(0.09f, neutralSat), surfaceContainer = tone(0.11f, neutralSat),
+        surfaceContainerHigh = tone(0.14f, neutralSat), surfaceContainerHighest = tone(0.18f, neutralSat),
+        outline = tone(0.58f, neutralSat), outlineVariant = tone(0.28f, neutralSat),
     )
 }
 
 /** (light, dark) for the app's colour choice; wallpaper colours need Android 12, before that it is Rain. */
-fun appSchemes(ctx: Context, s: Settings): Pair<ColorScheme, ColorScheme> = when {
-    s.appColors == AppColors.CUSTOM -> seedScheme(s.accent, false) to seedScheme(s.accent, true)
-    s.appColors == AppColors.WALLPAPER && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S ->
+fun appSchemes(ctx: Context, settings: Settings): Pair<ColorScheme, ColorScheme> = when {
+    settings.appColors == AppColors.CUSTOM -> seedScheme(settings.accent, false) to seedScheme(settings.accent, true)
+    settings.appColors == AppColors.WALLPAPER && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S ->
         dynamicLightColorScheme(ctx) to dynamicDarkColorScheme(ctx)
     else -> AppLight to AppDark
 }
@@ -126,9 +126,9 @@ fun appSchemes(ctx: Context, s: Settings): Pair<ColorScheme, ColorScheme> = when
 @Composable
 fun NowcastTheme(content: @Composable () -> Unit) {
     val ctx = LocalContext.current
-    val s by (ctx.applicationContext as App).repo.prefs.settings.collectAsState()
-    val dark = when (s.darkMode) { DarkMode.SYSTEM -> isSystemInDarkTheme(); DarkMode.LIGHT -> false; DarkMode.DARK -> true }
-    val (light, night) = remember(s.appColors, s.accent) { appSchemes(ctx, s) }
+    val settings by (ctx.applicationContext as App).repo.prefs.settings.collectAsState()
+    val dark = when (settings.darkMode) { DarkMode.SYSTEM -> isSystemInDarkTheme(); DarkMode.LIGHT -> false; DarkMode.DARK -> true }
+    val (light, night) = remember(settings.appColors, settings.accent) { appSchemes(ctx, settings) }
     // status-bar icons follow the app's mode, not the system's, when the mode is forced
     LaunchedEffect(dark) {
         val clear = android.graphics.Color.TRANSPARENT

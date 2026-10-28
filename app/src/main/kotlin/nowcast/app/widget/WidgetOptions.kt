@@ -38,19 +38,19 @@ data class WidgetOptions(
          * An empty state gets [default] (the provider's type) and the default look.
          * Unknown or broken values fall back one by one.
          */
-        fun fromMap(m: Map<String, *>, default: WidgetType = WidgetType.SUMMARY): WidgetOptions {
-            fun s(k: String) = m[k]?.toString()
-            val d = WidgetOptions(type = default)
+        fun fromMap(stored: Map<String, *>, default: WidgetType = WidgetType.SUMMARY): WidgetOptions {
+            fun value(key: String) = stored[key]?.toString()
+            val defaults = WidgetOptions(type = default)
             return WidgetOptions(
-                type = WidgetType.entries.firstOrNull { it.name == s("type") } ?: d.type,
-                theme = WidgetTheme.entries.firstOrNull { it.name == s("theme") } ?: d.theme,
-                opacity = (s("opacity")?.toIntOrNull() ?: d.opacity).coerceIn(0, 100),
-                units = RainUnits.entries.firstOrNull { it.name == s("units") } ?: d.units,
-                showChance = s("showChance")?.toBooleanStrictOrNull() ?: d.showChance,
-                tap = TapAction.entries.firstOrNull { it.name == s("tap") } ?: d.tap,
-                lead = s("lead")?.toIntOrNull()?.takeIf { it in LEADS } ?: d.lead,
-                refresh = RefreshButton.entries.firstOrNull { it.name == s("refresh") } ?: d.refresh,
-                text = TextSize.entries.firstOrNull { it.name == s("text") } ?: d.text,
+                type = WidgetType.entries.firstOrNull { it.name == value("type") } ?: defaults.type,
+                theme = WidgetTheme.entries.firstOrNull { it.name == value("theme") } ?: defaults.theme,
+                opacity = (value("opacity")?.toIntOrNull() ?: defaults.opacity).coerceIn(0, 100),
+                units = RainUnits.entries.firstOrNull { it.name == value("units") } ?: defaults.units,
+                showChance = value("showChance")?.toBooleanStrictOrNull() ?: defaults.showChance,
+                tap = TapAction.entries.firstOrNull { it.name == value("tap") } ?: defaults.tap,
+                lead = value("lead")?.toIntOrNull()?.takeIf { it in LEADS } ?: defaults.lead,
+                refresh = RefreshButton.entries.firstOrNull { it.name == value("refresh") } ?: defaults.refresh,
+                text = TextSize.entries.firstOrNull { it.name == value("text") } ?: defaults.text,
             )
         }
     }
@@ -66,23 +66,23 @@ object WidgetLayout {
     val BUCKETS = listOf(SMALL, MEDIUM, LARGE)
 
     /** What the launcher does with responsive layouts: the largest bucket that fits, else the smallest. */
-    fun bucket(w: Float, h: Float): Pair<Float, Float> =
-        BUCKETS.filter { it.first <= w && it.second <= h }.maxByOrNull { it.first * it.second } ?: SMALL
+    fun bucket(width: Float, height: Float): Pair<Float, Float> =
+        BUCKETS.filter { it.first <= width && it.second <= height }.maxByOrNull { it.first * it.second } ?: SMALL
 
-    fun sizeClass(w: Float, h: Float): SizeClass = when (bucket(w, h)) {
+    fun sizeClass(width: Float, height: Float): SizeClass = when (bucket(width, height)) {
         LARGE -> SizeClass.LARGE
         MEDIUM -> SizeClass.MEDIUM
         else -> SizeClass.SMALL
     }
 
     /** Combined only fits a large widget; smaller, it is the per-minute graph. */
-    fun pick(type: WidgetType, w: Float, h: Float): Pair<WidgetType, SizeClass> {
-        val c = sizeClass(w, h)
-        return (if (type == WidgetType.COMBINED && c != SizeClass.LARGE) WidgetType.MINUTES else type) to c
+    fun pick(type: WidgetType, width: Float, height: Float): Pair<WidgetType, SizeClass> {
+        val size = sizeClass(width, height)
+        return (if (type == WidgetType.COMBINED && size != SizeClass.LARGE) WidgetType.MINUTES else type) to size
     }
 
     /** Next 48 h shows 12 h when small. */
-    fun hours(c: SizeClass): Int = if (c == SizeClass.SMALL) 12 else 48
+    fun hours(size: SizeClass): Int = if (size == SizeClass.SMALL) 12 else 48
 }
 
 /** light / moderate / heavy instead of mm/h. */
@@ -103,22 +103,22 @@ object RainWords {
      * What a widget prints: [sentence] in the chosen units, the chance in brackets dropped when the widget
      * shows it big anyway, and numbers glued to their units so "6 h" never breaks across lines.
      */
-    fun widget(s: String, units: RainUnits, chanceShown: Boolean): String =
-        sentence(s, units).let { if (chanceShown) it.replace(chanceAside, "") else it }.replace(nbsp, "$1\u00A0$2")
+    fun widget(text: String, units: RainUnits, chanceShown: Boolean): String =
+        sentence(text, units).let { if (chanceShown) it.replace(chanceAside, "") else it }.replace(nbsp, "$1\u00A0$2")
 
     /** For one line on a 2×1: the engine's four sentences (Point.summary) cut to their point. */
-    fun short(s: String): String {
-        Regex("""^Raining now.*stopping in (\d+) min""").find(s)?.let { return "Rain now, stops in ${it.groupValues[1]}\u00A0min" }
-        if (s.startsWith("Raining now")) return "Raining now"
-        Regex("""^Rain starting in (\d+) min""").find(s)?.let { return "Rain in ${it.groupValues[1]}\u00A0min" }
-        if (s.startsWith("Probably dry")) return "Probably dry"
-        Regex("""^Dry for the next (\d+) minutes""").find(s)?.let { return "Dry for ${it.groupValues[1]}\u00A0min" }
-        return s
+    fun short(text: String): String {
+        Regex("""^Raining now.*stopping in (\d+) min""").find(text)?.let { return "Rain now, stops in ${it.groupValues[1]}\u00A0min" }
+        if (text.startsWith("Raining now")) return "Raining now"
+        Regex("""^Rain starting in (\d+) min""").find(text)?.let { return "Rain in ${it.groupValues[1]}\u00A0min" }
+        if (text.startsWith("Probably dry")) return "Probably dry"
+        Regex("""^Dry for the next (\d+) minutes""").find(text)?.let { return "Dry for ${it.groupValues[1]}\u00A0min" }
+        return text
     }
 
-    fun sentence(s: String, units: RainUnits): String {
-        if (units == RainUnits.MMH) return s
-        return s.replace(now) { m -> "${word(m.groupValues[1].replace(',', '.').toDouble()).replaceFirstChar { it.uppercase() }} rain now" }
-            .replace(upTo) { m -> "up to ${word(m.groupValues[1].replace(',', '.').toDouble())}" }
+    fun sentence(text: String, units: RainUnits): String {
+        if (units == RainUnits.MMH) return text
+        return text.replace(now) { match -> "${word(match.groupValues[1].replace(',', '.').toDouble()).replaceFirstChar { it.uppercase() }} rain now" }
+            .replace(upTo) { match -> "up to ${word(match.groupValues[1].replace(',', '.').toDouble())}" }
     }
 }

@@ -77,15 +77,15 @@ fun rememberMapView(): MapView {
     val view = remember { MapView(ctx).apply { onCreate(null) } }
     val lifecycle = LocalLifecycleOwner.current.lifecycle
     DisposableEffect(lifecycle) {
-        val obs = LifecycleEventObserver { _, e ->
-            when (e) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
                 Lifecycle.Event.ON_START -> view.onStart(); Lifecycle.Event.ON_RESUME -> view.onResume()
                 Lifecycle.Event.ON_PAUSE -> view.onPause(); Lifecycle.Event.ON_STOP -> view.onStop()
                 else -> {}
             }
         }
-        lifecycle.addObserver(obs)
-        onDispose { lifecycle.removeObserver(obs); view.onPause(); view.onStop(); view.onDestroy() }
+        lifecycle.addObserver(observer)
+        onDispose { lifecycle.removeObserver(observer); view.onPause(); view.onStop(); view.onDestroy() }
     }
     return view
 }
@@ -98,7 +98,7 @@ fun MapScreen(repo: Repo, state: UiState, now: Instant) {
     val mapView = rememberMapView()
     var map by remember { mutableStateOf<MapLibreMap?>(null) }
     var style by remember { mutableStateOf<Style?>(null) }
-    val fc = state.forecast
+    val forecast = state.forecast
     val frames by repo.frames.collectAsState()
     var minute by rememberSaveable { mutableIntStateOf(-1) }
     var playing by remember { mutableStateOf(false) }
@@ -109,71 +109,71 @@ fun MapScreen(repo: Repo, state: UiState, now: Instant) {
     val scope = rememberCoroutineScope()
 
     LaunchedEffect(frames) {
-        val f = frames ?: return@LaunchedEffect
-        if (minute !in 0..f.minutes) minute = f.minuteOf(f.newest)          // the newest radar frame
+        val loaded = frames ?: return@LaunchedEffect
+        if (minute !in 0..loaded.minutes) minute = loaded.minuteOf(loaded.newest)          // the newest radar frame
     }
     LaunchedEffect(playing, frames) {
-        val f = frames ?: return@LaunchedEffect
-        while (playing) { delay(100); minute = (minute + 1) % (f.minutes + 1) }          // a minute at a time
+        val loaded = frames ?: return@LaunchedEffect
+        while (playing) { delay(100); minute = (minute + 1) % (loaded.minutes + 1) }          // a minute at a time
     }
 
     LaunchedEffect(mapView) {
-        mapView.getMapAsync { m ->
-            map = m
-            m.uiSettings.isRotateGesturesEnabled = false; m.uiSettings.isTiltGesturesEnabled = false
-            m.uiSettings.isLogoEnabled = false
-            m.uiSettings.isAttributionEnabled = false    // shown as text on the map instead
-            m.addOnMapClickListener { ll ->
-                sheet = ll; sheetPoint = null; sheetFailed = false
+        mapView.getMapAsync { readyMap ->
+            map = readyMap
+            readyMap.uiSettings.isRotateGesturesEnabled = false; readyMap.uiSettings.isTiltGesturesEnabled = false
+            readyMap.uiSettings.isLogoEnabled = false
+            readyMap.uiSettings.isAttributionEnabled = false    // shown as text on the map instead
+            readyMap.addOnMapClickListener { tapped ->
+                sheet = tapped; sheetPoint = null; sheetFailed = false
                 scope.launch {
-                    val p = repo.pointAt(ll.latitude, ll.longitude)
-                    if (sheet == ll) { sheetPoint = p; sheetFailed = p == null }     // a later tap wins
+                    val result = repo.pointAt(tapped.latitude, tapped.longitude)
+                    if (sheet == tapped) { sheetPoint = result; sheetFailed = result == null }     // a later tap wins
                 }
                 true
             }
         }
     }
     LaunchedEffect(map, dark) {
-        val m = map ?: return@LaunchedEffect
+        val current = map ?: return@LaunchedEffect
         style = null                                 // the old one is invalid once the new one loads
-        m.setStyle(mapStyle(dark)) { st -> style = st }
+        current.setStyle(mapStyle(dark)) { loaded -> style = loaded }
     }
     // camera: frame the region once per region
     val regionId = frames?.regionId
     val density = LocalDensity.current
     LaunchedEffect(map, regionId) {
-        val m = map ?: return@LaunchedEffect; val b = frames?.bbox ?: return@LaunchedEffect
+        val current = map ?: return@LaunchedEffect; val bbox = frames?.bbox ?: return@LaunchedEffect
         // the region in the part of the map left visible: under the top buttons, above the time panel
-        val px = { dp: Int -> (dp * density.density).toInt() }
-        m.moveCamera(CameraUpdateFactory.newLatLngBounds(LatLngBounds.from(b[3], b[2], b[1], b[0]), px(12), px(72), px(12), px(236)))
+        val pixels = { dp: Int -> (dp * density.density).toInt() }
+        current.moveCamera(CameraUpdateFactory.newLatLngBounds(LatLngBounds.from(bbox[3], bbox[2], bbox[1], bbox[0]), pixels(12), pixels(72), pixels(12), pixels(236)))
     }
     val lut = remember(settings.palette, settings.radarColors) { settings.radarLut() }
     LaunchedEffect(style, frames, minute, lut) {
-        val st = style ?: return@LaunchedEffect; val f = frames ?: return@LaunchedEffect
-        if (minute !in 0..f.minutes) return@LaunchedEffect
-        val bmp = withContext(Dispatchers.Default) {
-            Bitmap.createBitmap(Render.argb(f.levelsAt(minute), lut), f.w, f.h, Bitmap.Config.ARGB_8888)
+        val loadedStyle = style ?: return@LaunchedEffect; val loaded = frames ?: return@LaunchedEffect
+        if (minute !in 0..loaded.minutes) return@LaunchedEffect
+        val bitmap = withContext(Dispatchers.Default) {
+            Bitmap.createBitmap(Render.argb(loaded.levelsAt(minute), lut), loaded.width, loaded.height, Bitmap.Config.ARGB_8888)
         }
-        val b = f.bbox
-        val quad = LatLngQuad(LatLng(b[3], b[0]), LatLng(b[3], b[2]), LatLng(b[1], b[2]), LatLng(b[1], b[0]))
-        val src = st.getSourceAs<ImageSource>("rain")
-        if (src == null) {
-            st.addSource(ImageSource("rain", quad, bmp))
+        val bbox = loaded.bbox
+        val quad = LatLngQuad(LatLng(bbox[3], bbox[0]), LatLng(bbox[3], bbox[2]), LatLng(bbox[1], bbox[2]), LatLng(bbox[1], bbox[0]))
+        val source = loadedStyle.getSourceAs<ImageSource>("rain")
+        if (source == null) {
+            loadedStyle.addSource(ImageSource("rain", quad, bitmap))
             // under the place names, so towns stay readable through the rain
-            val labels = st.layers.firstOrNull { it is SymbolLayer }?.id
+            val labels = loadedStyle.layers.firstOrNull { it is SymbolLayer }?.id
             val layer = RasterLayer("rain", "rain").withProperties(rasterFadeDuration(0f), rasterOpacity(0.9f), rasterResampling("linear"))
-            if (labels != null) st.addLayerBelow(layer, labels) else st.addLayer(layer)
-        } else { src.setCoordinates(quad); src.setImage(bmp) }
+            if (labels != null) loadedStyle.addLayerBelow(layer, labels) else loadedStyle.addLayer(layer)
+        } else { source.setCoordinates(quad); source.setImage(bitmap) }
     }
     LaunchedEffect(style, settings.home) {
-        val st = style ?: return@LaunchedEffect
-        val pt = Point.fromLngLat(settings.home.second, settings.home.first)
-        val src = st.getSourceAs<GeoJsonSource>("home")
-        if (src == null) {
-            st.addSource(GeoJsonSource("home", pt))
-            st.addLayer(CircleLayer("home", "home").withProperties(circleRadius(7f), circleColor("#1F5FA8"),
+        val loadedStyle = style ?: return@LaunchedEffect
+        val homePoint = Point.fromLngLat(settings.home.second, settings.home.first)
+        val source = loadedStyle.getSourceAs<GeoJsonSource>("home")
+        if (source == null) {
+            loadedStyle.addSource(GeoJsonSource("home", homePoint))
+            loadedStyle.addLayer(CircleLayer("home", "home").withProperties(circleRadius(7f), circleColor("#1F5FA8"),
                 circleStrokeColor("#FFFFFF"), circleStrokeWidth(2.5f)))
-        } else src.setGeoJson(pt)
+        } else source.setGeoJson(homePoint)
     }
 
     Box(Modifier.fillMaxSize()) {
@@ -182,31 +182,31 @@ fun MapScreen(repo: Repo, state: UiState, now: Instant) {
             color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.align(Alignment.TopStart).statusBarsPadding().padding(8.dp)
                 .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.8f), RoundedCornerShape(6.dp)).padding(horizontal = 6.dp, vertical = 2.dp))
         Column(Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            PalettePicker(settings.palette, settings.radarColors, { p -> repo.updateLook { it.copy(palette = p) } },
-                { c -> repo.updateLook { it.copy(palette = Render.CUSTOM, radarColors = c) } }, Modifier)
+            PalettePicker(settings.palette, settings.radarColors, { chosen -> repo.updateLook { it.copy(palette = chosen) } },
+                { colors -> repo.updateLook { it.copy(palette = Render.CUSTOM, radarColors = colors) } }, Modifier)
             ModelPicker(repo, frames?.regionId ?: state.forecast?.region?.id)
         }
 
-        val f = frames
+        val shownFrames = frames
         Surface(Modifier.align(Alignment.BottomCenter).padding(12.dp).widthIn(max = 640.dp).fillMaxWidth(),
             shape = RoundedCornerShape(28.dp), color = MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.96f),
             shadowElevation = 6.dp) {
             Column(Modifier.padding(start = 8.dp, end = 18.dp, top = 8.dp, bottom = 10.dp)) {
                 // a model swap or refresh re-running the forecast
-                if (state.loading && f != null) LinearProgressIndicator(Modifier.fillMaxWidth().padding(start = 10.dp, bottom = 6.dp))
-                if (fc == null && f == null && (!repo.hasKey || settings.nowcastSource == NowcastSource.OPEN_METEO)) {
+                if (state.loading && shownFrames != null) LinearProgressIndicator(Modifier.fillMaxWidth().padding(start = 10.dp, bottom = 6.dp))
+                if (forecast == null && shownFrames == null && (!repo.hasKey || settings.nowcastSource == NowcastSource.OPEN_METEO)) {
                     Text(if (!repo.hasKey) "The radar map needs a MeteoGate key (Settings). The Now screen and widgets use Open-Meteo without one."
                         else "Open-Meteo mode loads no radar for home. Tap a place in Europe to load the radar there.",
                         Modifier.padding(12.dp), style = MaterialTheme.typography.bodyMedium)
-                } else if (f == null || minute !in 0..f.minutes) {
+                } else if (shownFrames == null || minute !in 0..shownFrames.minutes) {
                     Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
                         CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp); Spacer(Modifier.width(12.dp))
-                        Text(if (fc == null) "Waiting for the radar…" else "Drawing the forecast…")
+                        Text(if (forecast == null) "Waiting for the radar…" else "Drawing the forecast…")
                     }
                 } else {
-                    val t = f.time(minute)
-                    val rel = Duration.between(now, t).toMinutes().toInt()
-                    val future = t > f.issued
+                    val time = shownFrames.time(minute)
+                    val minutesFromNow = Duration.between(now, time).toMinutes().toInt()
+                    val future = time > shownFrames.issued
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         FilledIconButton({ playing = !playing }, Modifier.size(48.dp)) {
                             Icon(if (playing) Icons.Outlined.Pause else Icons.Outlined.PlayArrow, if (playing) "Pause" else "Play")
@@ -214,48 +214,48 @@ fun MapScreen(repo: Repo, state: UiState, now: Instant) {
                         Spacer(Modifier.width(12.dp))
                         Column(Modifier.weight(1f)) {
                             Row(verticalAlignment = Alignment.Bottom) {
-                                Text(HM.format(t.atZone(java.time.ZoneId.systemDefault())), style = MaterialTheme.typography.headlineSmall)
+                                Text(TIME_FORMAT.format(time.atZone(java.time.ZoneId.systemDefault())), style = MaterialTheme.typography.headlineSmall)
                                 Spacer(Modifier.width(8.dp))
-                                Text(if (abs(rel) < 1) "now" else if (rel > 0) "in $rel min" else "${-rel} min ago",
+                                Text(if (abs(minutesFromNow) < 1) "now" else if (minutesFromNow > 0) "in $minutesFromNow min" else "${-minutesFromNow} min ago",
                                     Modifier.padding(bottom = 3.dp), style = MaterialTheme.typography.bodyMedium,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
-                            val by = state.forecast?.takeIf { it.region.id == f.regionId }
+                            val modelLabel = state.forecast?.takeIf { it.region.id == shownFrames.regionId }
                                 ?.let { if (it.modelUsed) " · ${it.region.model.removeSuffix(".onnx")}" else " · ensemble only" } ?: ""
-                            Text(if (future) "Forecast$by" else "Radar", style = MaterialTheme.typography.labelMedium,
+                            Text(if (future) "Forecast$modelLabel" else "Radar", style = MaterialTheme.typography.labelMedium,
                                 color = if (future) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         RateLegend(lut)
                     }
                     Spacer(Modifier.height(6.dp))
-                    MapTimeline(f, minute, { minute = it; playing = false }, state.point, state.issued, now,
+                    MapTimeline(shownFrames, minute, { minute = it; playing = false }, state.point, state.issued, now,
                         Modifier.padding(start = 4.dp))
                 }
             }
         }
     }
 
-    sheet?.let { ll ->
+    sheet?.let { place ->
         ModalBottomSheet({ sheet = null }, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
             Column(Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).padding(bottom = 32.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Text("%.3f, %.3f".format(java.util.Locale.ROOT, ll.latitude, ll.longitude), style = Overline,
+                Text("%.3f, %.3f".format(java.util.Locale.ROOT, place.latitude, place.longitude), style = Overline,
                     color = MaterialTheme.colorScheme.primary)
-                val (p, iss) = sheetPoint ?: (null to null)
+                val (point, issued) = sheetPoint ?: (null to null)
                 if (sheetFailed) {
-                    Text((state.problem as? Problem.Network)?.let { "No forecast here: ${it.msg}" }
-                        ?: (state.problem as? Problem.Radar)?.let { "No forecast here: ${it.msg}" }
+                    Text((state.problem as? Problem.Network)?.let { "No forecast here: ${it.message}" }
+                        ?: (state.problem as? Problem.Radar)?.let { "No forecast here: ${it.message}" }
                         ?: if (!repo.hasKey) "The radar forecast for a place needs a MeteoGate key (Settings)." else "No forecast here right now.",
                         style = MaterialTheme.typography.bodyLarge)
-                } else if (p == null || iss == null) {
+                } else if (point == null || issued == null) {
                     Shimmer(Modifier.fillMaxWidth().height(30.dp)); Shimmer(Modifier.fillMaxWidth().height(220.dp))
                 } else {
-                    Text(p.summary, style = MaterialTheme.typography.headlineSmall)
-                    if (!p.inCoverage) Text("Outside the radar crop — values are from its nearest edge.",
+                    Text(point.summary, style = MaterialTheme.typography.headlineSmall)
+                    if (!point.inCoverage) Text("Outside the radar crop — values are from its nearest edge.",
                         style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.error)
-                    NowcastGraph(p, iss, now)
+                    NowcastGraph(point, issued, now)
                 }
-                Button({ scope.launch { repo.setHome(ll.latitude, ll.longitude) }; sheet = null },
+                Button({ scope.launch { repo.setHome(place.latitude, place.longitude) }; sheet = null },
                     Modifier.fillMaxWidth().heightIn(min = 52.dp)) {
                     Icon(Icons.Outlined.Home, null); Spacer(Modifier.width(8.dp)); Text("Set as home")
                 }

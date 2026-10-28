@@ -19,16 +19,16 @@ import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
 
 class Prefs(ctx: Context) {
-    private val sp = ctx.getSharedPreferences("settings", Context.MODE_PRIVATE)
-    private val flow = MutableStateFlow(Settings.fromMap(sp.all))
+    private val prefs = ctx.getSharedPreferences("settings", Context.MODE_PRIVATE)
+    private val flow = MutableStateFlow(Settings.fromMap(prefs.all))
     val settings: StateFlow<Settings> = flow
     val value: Settings get() = flow.value
 
     /** Synchronized: the screens and the cycle's coroutines both update, and a lost update is a lost setting. */
-    @Synchronized fun update(f: (Settings) -> Settings) {
-        val s = f(flow.value)
-        sp.edit().clear().apply { s.toMap().forEach { (k, v) -> putString(k, v) } }.apply()
-        flow.value = s
+    @Synchronized fun update(transform: (Settings) -> Settings) {
+        val next = transform(flow.value)
+        prefs.edit().clear().apply { next.toMap().forEach { (name, text) -> putString(name, text) } }.apply()
+        flow.value = next
     }
 }
 
@@ -36,14 +36,14 @@ class Prefs(ctx: Context) {
  * API keys per radar source, AES-GCM with a key that never leaves the Android Keystore.
  */
 class Secrets(ctx: Context) {
-    private val sp = ctx.getSharedPreferences("secrets", Context.MODE_PRIVATE)
-    private val flow = MutableStateFlow(sp.all.keys.toSet())
+    private val prefs = ctx.getSharedPreferences("secrets", Context.MODE_PRIVATE)
+    private val flow = MutableStateFlow(prefs.all.keys.toSet())
     /** Sources that have a key; the keys themselves are only read on demand. */
     val sources: StateFlow<Set<String>> = flow
 
     private fun key(): SecretKey {
-        val ks = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
-        (ks.getEntry(ALIAS, null) as? KeyStore.SecretKeyEntry)?.let { return it.secretKey }
+        val keyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+        (keyStore.getEntry(ALIAS, null) as? KeyStore.SecretKeyEntry)?.let { return it.secretKey }
         return KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore").apply {
             init(KeyGenParameterSpec.Builder(ALIAS, KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT)
                 .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
@@ -51,23 +51,23 @@ class Secrets(ctx: Context) {
         }.generateKey()
     }
 
-    fun get(source: String): String? = sp.getString(source, null)?.let {
+    fun get(source: String): String? = prefs.getString(source, null)?.let {
         runCatching {
             val raw = Base64.decode(it, Base64.NO_WRAP)
-            val c = Cipher.getInstance(AES)
-            c.init(Cipher.DECRYPT_MODE, key(), GCMParameterSpec(128, raw, 0, 12))
-            String(c.doFinal(raw, 12, raw.size - 12), Charsets.UTF_8)
+            val cipher = Cipher.getInstance(AES)
+            cipher.init(Cipher.DECRYPT_MODE, key(), GCMParameterSpec(128, raw, 0, 12))
+            String(cipher.doFinal(raw, 12, raw.size - 12), Charsets.UTF_8)
         }.getOrNull()
     }
 
     fun set(source: String, value: String?) {
-        if (value.isNullOrBlank()) sp.edit().remove(source).apply()
+        if (value.isNullOrBlank()) prefs.edit().remove(source).apply()
         else {
-            val c = Cipher.getInstance(AES).apply { init(Cipher.ENCRYPT_MODE, key()) }
-            val ct = c.doFinal(value.trim().toByteArray(Charsets.UTF_8))
-            sp.edit().putString(source, Base64.encodeToString(c.iv + ct, Base64.NO_WRAP)).apply()
+            val cipher = Cipher.getInstance(AES).apply { init(Cipher.ENCRYPT_MODE, key()) }
+            val encrypted = cipher.doFinal(value.trim().toByteArray(Charsets.UTF_8))
+            prefs.edit().putString(source, Base64.encodeToString(cipher.iv + encrypted, Base64.NO_WRAP)).apply()
         }
-        flow.value = sp.all.keys.toSet()
+        flow.value = prefs.all.keys.toSet()
     }
 
     private companion object { const val ALIAS = "api-keys"; const val AES = "AES/GCM/NoPadding" }
@@ -97,8 +97,8 @@ class ModelStore(private val ctx: Context) {
     private fun list() = listOf(BUNDLED) + (dir.listFiles()?.map { it.name }?.filter { it.endsWith(".onnx") }?.sorted() ?: emptyList())
 
     fun bytes(name: String): ByteArray {
-        val f = File(dir, name)
-        return if (name != BUNDLED && f.exists()) f.readBytes() else ctx.assets.open(BUNDLED).readBytes()
+        val file = File(dir, name)
+        return if (name != BUNDLED && file.exists()) file.readBytes() else ctx.assets.open(BUNDLED).readBytes()
     }
 
     fun isKnown(name: String) = name == BUNDLED || File(dir, name).exists()
@@ -114,9 +114,9 @@ class ModelStore(private val ctx: Context) {
         var name = display.replace(Regex("[^A-Za-z0-9._-]"), "_").let { if (it.endsWith(".onnx")) it else "$it.onnx" }
         if (name == BUNDLED) name = "user-$name"
         val tmp = File(dir, "$name.part")
-        ctx.contentResolver.openInputStream(uri)!!.use { i -> tmp.outputStream().use { i.copyTo(it) } }
-        val err = Validate.model(tmp.readBytes())
-        if (err != null) { tmp.delete(); throw IllegalArgumentException(err) }
+        ctx.contentResolver.openInputStream(uri)!!.use { input -> tmp.outputStream().use { input.copyTo(it) } }
+        val problem = Validate.model(tmp.readBytes())
+        if (problem != null) { tmp.delete(); throw IllegalArgumentException(problem) }
         tmp.renameTo(File(dir, name))
         flow.value = list()
         return name

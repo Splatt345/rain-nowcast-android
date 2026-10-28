@@ -35,25 +35,25 @@ object OpenMeteoNowcast {
      * issue time. A value at t is the precipitation of the 15 minutes before t, so a minute takes the slot
      * ending at or after it, times 4 for mm/h.
      */
-    fun point(h: Hourly, now: Instant): Pair<PointForecast, Instant> {
-        val members = h.series.values.filter { s -> s.isNotEmpty() && s.all { it.isFinite() } }
+    fun point(hourly: Hourly, now: Instant): Pair<PointForecast, Instant> {
+        val members = hourly.series.values.filter { series -> series.isNotEmpty() && series.all { it.isFinite() } }
         if (members.isEmpty()) throw OutlookException("Open-Meteo has no 15-minute precipitation here")
         val issued = Instant.ofEpochSecond(now.epochSecond - Math.floorMod(now.epochSecond, SLOT_MIN * 60L))
         val minutes = IntArray(PAST_MIN + AHEAD_MIN + 1) { it - PAST_MIN }
-        fun slot(m: Int): Int? {
-            val t = issued.plusSeconds(60L * m)
-            return h.time.indexOfFirst { !it.isBefore(t) && Duration.between(t, it).toMinutes() < SLOT_MIN }.takeIf { it >= 0 }
+        fun slot(minute: Int): Int? {
+            val time = issued.plusSeconds(60L * minute)
+            return hourly.time.indexOfFirst { !it.isBefore(time) && Duration.between(time, it).toMinutes() < SLOT_MIN }.takeIf { it >= 0 }
         }
-        val idx = minutes.map(::slot)
-        if (idx.any { it == null }) throw OutlookException("Open-Meteo's 15-minute series does not cover the hour around now")
-        val curves = members.map { s -> DoubleArray(minutes.size) { s[idx[it]!!] * 60.0 / SLOT_MIN } }
-        fun at(t: Int) = DoubleArray(curves.size) { curves[it][t] }
+        val slots = minutes.map(::slot)
+        if (slots.any { it == null }) throw OutlookException("Open-Meteo's 15-minute series does not cover the hour around now")
+        val curves = members.map { series -> DoubleArray(minutes.size) { series[slots[it]!!] * 60.0 / SLOT_MIN } }
+        fun at(index: Int) = DoubleArray(curves.size) { curves[it][index] }
         val mean = DoubleArray(minutes.size) { at(it).average() }
-        val prob = DoubleArray(minutes.size) { t -> curves.count { it[t] >= RAIN_THRESHOLD }.toDouble() / curves.size }
-        fun q(p: Double) = DoubleArray(minutes.size) { percentile(at(it), p) }
+        val probability = DoubleArray(minutes.size) { index -> curves.count { it[index] >= RAIN_THRESHOLD }.toDouble() / curves.size }
+        fun quantile(percent: Double) = DoubleArray(minutes.size) { percentile(at(it), percent) }
         val zero = minutes.indexOfFirst { it >= 0 }
         val age = Duration.between(issued, now).toMinutes().toInt()
-        return PointForecast(minutes, mean, prob, q(0.0), q(10.0), q(25.0), q(75.0), q(90.0), q(100.0),
-            prob.copyOfRange(zero, prob.size).max(), summary(minutes, mean, prob, age), true) to issued
+        return PointForecast(minutes, mean, probability, quantile(0.0), quantile(10.0), quantile(25.0), quantile(75.0), quantile(90.0), quantile(100.0),
+            probability.copyOfRange(zero, probability.size).max(), summary(minutes, mean, probability, age), true) to issued
     }
 }

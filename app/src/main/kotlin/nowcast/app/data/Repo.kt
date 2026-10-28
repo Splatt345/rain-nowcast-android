@@ -25,8 +25,8 @@ import kotlin.math.abs
 
 sealed interface Problem {
     data object NoKey : Problem
-    data class Network(val msg: String) : Problem
-    data class Radar(val msg: String) : Problem
+    data class Network(val message: String) : Problem
+    data class Radar(val message: String) : Problem
     /** Home is outside the region picked in Settings: that region still loads, home gets no point. */
     data class Outside(val region: String) : Problem
 }
@@ -70,26 +70,26 @@ class Repo(private val ctx: Context) {
 
     init {
         scope.launch(Dispatchers.IO) {
-            val f = MapFrames.read(ctx.filesDir)?.takeIf { Duration.between(it.issued, Instant.now()).toHours() < 3 }
-            frameFlow.compareAndSet(null, f)
+            val restored = MapFrames.read(ctx.filesDir)?.takeIf { Duration.between(it.issued, Instant.now()).toHours() < 3 }
+            frameFlow.compareAndSet(null, restored)
         }
     }
 
     /** In the background, off the cycle's lock: the Now screen does not wait for the map. */
-    private fun drawMap(fc: Forecast) {
-        if (fc === framesFor) return
-        framesFor = fc
+    private fun drawMap(forecast: Forecast) {
+        if (forecast === framesFor) return
+        framesFor = forecast
         scope.launch {
-            val f = MapFrames.of(fc)
-            if (framesFor === fc) frameFlow.value = f
-            withContext(Dispatchers.IO) { runCatching { MapFrames.write(ctx.filesDir, f) } }
+            val drawn = MapFrames.of(forecast)
+            if (framesFor === forecast) frameFlow.value = drawn
+            withContext(Dispatchers.IO) { runCatching { MapFrames.write(ctx.filesDir, drawn) } }
         }
     }
 
     fun kick(force: Boolean = false) { if (force || !lock.isLocked) scope.launch { refresh(force) } }
 
     /** A colour change: the widgets draw with these settings too, so redraw them now rather than at the next refresh. */
-    fun updateLook(f: (Settings) -> Settings) { prefs.update(f); scope.launch { runCatching { Widgets.updateAll(ctx) } } }
+    fun updateLook(transform: (Settings) -> Settings) { prefs.update(transform); scope.launch { runCatching { Widgets.updateAll(ctx) } } }
 
     private var modelBroken: String? = null           // a failed model is not retried until another is picked
     private var smaat: Pair<String, SmaatModel>? = null
@@ -109,23 +109,23 @@ class Repo(private val ctx: Context) {
     /** [chosen]: home's cycle, where a region picked in Settings wins even when home is outside it. */
     fun regionFor(lat: Double, lon: Double, chosen: Boolean = false): Region {
         val regions = regionStore.regions.value
-        val s = prefs.value
-        if (chosen) s.regionId?.let { id -> regions.firstOrNull { it.id == id } }?.let { return it }
-        return s.regionId?.let { id -> regions.firstOrNull { it.id == id && it.contains(lat, lon) } }
+        val settings = prefs.value
+        if (chosen) settings.regionId?.let { id -> regions.firstOrNull { it.id == id } }?.let { return it }
+        return settings.regionId?.let { id -> regions.firstOrNull { it.id == id && it.contains(lat, lon) } }
             ?: Regions.pick(regions, lat, lon)
-            ?: s.regionId?.let { id -> regions.firstOrNull { it.id == id } }
+            ?: settings.regionId?.let { id -> regions.firstOrNull { it.id == id } }
             ?: regions.first()
     }
 
     /** Run a cycle for the region containing home (or [at], a map tap elsewhere). */
     suspend fun refresh(force: Boolean = false, at: Pair<Double, Double>? = null) = lock.withLock {
         if (at == null) follow()
-        val s = prefs.value
-        if (openMeteo && at == null) { refreshOpenMeteo(s); return@withLock }
+        val settings = prefs.value
+        if (openMeteo && at == null) { refreshOpenMeteo(settings); return@withLock }
         val key = secrets.get(SOURCE_OPERA)
         // Open-Meteo users without a key: the map has no radar, which is not a problem for the Now screen
         if (key == null) { if (!openMeteo) flow.update { it.copy(problem = Problem.NoKey, loading = false) }; return@withLock }
-        val (lat, lon) = at ?: s.home
+        val (lat, lon) = at ?: settings.home
         val region = regionFor(lat, lon, chosen = at == null)
         flow.update { it.copy(loading = true, regionName = if (openMeteo) it.regionName else region.name) }
         try {
@@ -137,24 +137,24 @@ class Repo(private val ctx: Context) {
             // a fresh run: let go of the old ensemble first, two of them do not fit a 192 MB heap.
             // The map keeps its own frames meanwhile.
             if (!reuse && old != null) { flow.update { it.copy(forecast = null) }; old = null }
-            val fc = if (reuse) old!!
-            else withContext(Dispatchers.Default) { Nowcaster(if (s.useModel) model(region) else null, dir = ctx.cacheDir).run(region, frames) }
-            if (fc.modelError != null && modelBroken == null) modelBroken = fc.modelError
+            val latest = if (reuse) old!!
+            else withContext(Dispatchers.Default) { Nowcaster(if (settings.useModel) model(region) else null, dir = ctx.cacheDir).run(region, frames) }
+            if (latest.modelError != null && modelBroken == null) modelBroken = latest.modelError
             val note = when {
-                !s.useModel -> null
+                !settings.useModel -> null
                 modelBroken != null -> "ML model failed (${modelBroken}); ensemble only until you pick a model again"
                 region.model != ModelStore.BUNDLED && !modelStore.isKnown(region.model) ->
                     "${region.model} not found; using the bundled model, which was not trained on this region"
                 region.id != "be" && region.model == ModelStore.BUNDLED -> "The bundled model was trained on Belgium only"
                 else -> null
             }
-            if (openMeteo) flow.update { it.copy(forecast = fc) }      // a map look-up; home stays on Open-Meteo
+            if (openMeteo) flow.update { it.copy(forecast = latest) }      // a map look-up; home stays on Open-Meteo
             else {
-                val (hl, ho) = s.home
-                val home = fc.region.contains(hl, ho)
-                val outside = !home && at == null       // home's own cycle, but the picked region is elsewhere
-                val point = if (home) withContext(Dispatchers.Default) { fc.point(hl, ho) } else if (outside) null else flow.value.point
-                flow.update { it.copy(forecast = fc, point = point, issued = if (home) fc.issued else if (outside) null else it.issued,
+                val (homeLat, homeLon) = settings.home
+                val covered = latest.region.contains(homeLat, homeLon)
+                val outside = !covered && at == null       // home's own cycle, but the picked region is elsewhere
+                val point = if (covered) withContext(Dispatchers.Default) { latest.point(homeLat, homeLon) } else if (outside) null else flow.value.point
+                flow.update { it.copy(forecast = latest, point = point, issued = if (covered) latest.issued else if (outside) null else it.issued,
                     modelOnly = false, problem = if (outside) Problem.Outside(region.name) else null, modelNote = note,
                     updated = Instant.now()) }
             }
@@ -170,9 +170,9 @@ class Repo(private val ctx: Context) {
             flow.update { it.copy(loading = false) }
         }
         flow.value.forecast?.let(::drawMap)
-        refreshOutlook(s)
-        val st = flow.value
-        if (!openMeteo) publish(st.forecast, st.point, full = true)
+        refreshOutlook(settings)
+        val current = flow.value
+        if (!openMeteo) publish(current.forecast, current.point, full = true)
         save()
     }
 
@@ -181,11 +181,11 @@ class Repo(private val ctx: Context) {
     }
 
     /** The Now screen, widgets and alert from Open-Meteo: one small request, no radar, no key needed. */
-    private suspend fun refreshOpenMeteo(s: Settings) {
+    private suspend fun refreshOpenMeteo(settings: Settings) {
         flow.update { it.copy(loading = true, regionName = Snapshot.SOURCE_OPEN_METEO) }
         try {
-            val (p, issued) = withContext(Dispatchers.IO) { OpenMeteoNowcast.fetch(s.home.first, s.home.second, secrets.get(SOURCE_OPEN_METEO)) }
-            flow.update { it.copy(point = p, issued = issued, modelOnly = true, problem = null, modelNote = null, updated = Instant.now()) }
+            val (nowcast, issued) = withContext(Dispatchers.IO) { OpenMeteoNowcast.fetch(settings.home.first, settings.home.second, secrets.get(SOURCE_OPEN_METEO)) }
+            flow.update { it.copy(point = nowcast, issued = issued, modelOnly = true, problem = null, modelNote = null, updated = Instant.now()) }
         } catch (e: CancellationException) {
             throw e
         } catch (e: IOException) {
@@ -195,17 +195,17 @@ class Repo(private val ctx: Context) {
         } finally {
             flow.update { it.copy(loading = false) }
         }
-        refreshOutlook(s)
+        refreshOutlook(settings)
         publishPoint(full = true)
         save()
     }
 
     private suspend fun publishPoint(full: Boolean) {
-        val st = flow.value
-        val p = st.point; val issued = st.issued
-        if (p != null && issued != null && st.modelOnly) withContext(Dispatchers.IO) {
+        val current = flow.value
+        val nowcast = current.point; val issued = current.issued
+        if (nowcast != null && issued != null && current.modelOnly) withContext(Dispatchers.IO) {
             val now = Instant.now()
-            runCatching { Snapshot.ofPoint(p, issued, OutlookBars.join(st.outlook, p, issued, now), full, now).write(ctx.filesDir) }
+            runCatching { Snapshot.ofPoint(nowcast, issued, OutlookBars.join(current.outlook, nowcast, issued, now), full, now).write(ctx.filesDir) }
         }
         runCatching { Widgets.updateAll(ctx) }
     }
@@ -217,18 +217,18 @@ class Repo(private val ctx: Context) {
      */
     suspend fun refreshPoint(force: Boolean = false): Pair<PointForecast, Instant>? = lock.withLock {
         follow()
-        val s = prefs.value
+        val settings = prefs.value
         if (openMeteo) {
-            refreshOpenMeteo(s)
-            val st = flow.value
-            return@withLock if (st.problem == null && st.modelOnly) st.point?.let { p -> st.issued?.let { p to it } } else null
+            refreshOpenMeteo(settings)
+            val current = flow.value
+            return@withLock if (current.problem == null && current.modelOnly) current.point?.let { nowcast -> current.issued?.let { nowcast to it } } else null
         }
         val key = secrets.get(SOURCE_OPERA)
         if (key == null) return@withLock null
-        val home = s.home; val (lat, lon) = home
+        val home = settings.home; val (lat, lon) = home
         val region = regionFor(lat, lon)
         var result: Pair<PointForecast, Instant>? = null
-        var fc: Forecast? = null
+        var boxForecast: Forecast? = null
         try {
             val frames = withContext(Dispatchers.IO) {
                 RadarSource(key, File(ctx.cacheDir, "radar")).run { prune(); latestFrames(region, 12, bbox = pointBbox(lat, lon, Cycle.BOX_KM)) }
@@ -236,26 +236,26 @@ class Repo(private val ctx: Context) {
             val last = withContext(Dispatchers.IO) { Snapshot.read(ctx.filesDir) }
             val lastHome = last?.radar?.let { it.homeLat to it.homeLon }
             if (!Cycle.skip(frames.last().time, last?.let { Instant.ofEpochSecond(it.issued) }, Cycle.sameHome(home, lastHome), force)) {
-                fc = withContext(Dispatchers.Default) { Cycle.box(Nowcaster(if (s.useModel) model(region) else null, dir = ctx.cacheDir), region, frames, lat, lon) }
-                if (fc.modelError != null && modelBroken == null) modelBroken = fc.modelError
-                result = withContext(Dispatchers.Default) { fc.point(lat, lon) } to fc.issued
+                boxForecast = withContext(Dispatchers.Default) { Cycle.box(Nowcaster(if (settings.useModel) model(region) else null, dir = ctx.cacheDir), region, frames, lat, lon) }
+                if (boxForecast.modelError != null && modelBroken == null) modelBroken = boxForecast.modelError
+                result = withContext(Dispatchers.Default) { boxForecast.point(lat, lon) } to boxForecast.issued
             }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
             // the widgets show the age of what they have; the next cycle tries again
         }
-        if (result != null) refreshOutlook(s)
-        publish(fc, result?.first, full = false)
+        if (result != null) refreshOutlook(settings)
+        publish(boxForecast, result?.first, full = false)
         result
     }
 
     /** Outlook at home, hourly or when home moved. Never replaced by anything invented on failure. */
-    private suspend fun refreshOutlook(s: Settings) {
-        val home = s.home
-        val o = flow.value.outlook
+    private suspend fun refreshOutlook(settings: Settings) {
+        val home = settings.home
+        val current = flow.value.outlook
         val moved = outlookAt?.let { abs(it.first - home.first) + abs(it.second - home.second) > 0.01 } ?: true
-        if (o != null && !moved && Duration.between(o.fetched, Instant.now()).toMinutes() < 60) return
+        if (current != null && !moved && Duration.between(current.fetched, Instant.now()).toMinutes() < 60) return
         try {
             val fresh = withContext(Dispatchers.IO) { fetchOutlook(home.first, home.second, outlookModel) }
             outlookAt = home
@@ -284,7 +284,7 @@ class Repo(private val ctx: Context) {
      * The forecast re-runs at once on the radar already downloaded.
      */
     fun setModel(name: String?) {
-        val region = flow.value.forecast?.region?.let { r -> regionStore.regions.value.firstOrNull { it.id == r.id } }
+        val region = flow.value.forecast?.region?.let { shown -> regionStore.regions.value.firstOrNull { it.id == shown.id } }
             ?: regionFor(prefs.value.home.first, prefs.value.home.second, chosen = true)
         if (name == null) prefs.update { it.copy(useModel = false) }
         else {
@@ -293,8 +293,8 @@ class Repo(private val ctx: Context) {
         }
         modelBroken = null
         // a region looked up on the map re-runs as that look-up; home's own region as home's cycle
-        val (hl, ho) = prefs.value.home
-        val at = region.takeIf { it.id != regionFor(hl, ho, chosen = true).id }
+        val (homeLat, homeLon) = prefs.value.home
+        val at = region.takeIf { it.id != regionFor(homeLat, homeLon, chosen = true).id }
             ?.let { (it.bbox[1] + it.bbox[3]) / 2 to (it.bbox[0] + it.bbox[2]) / 2 }
         scope.launch { refresh(force = true, at = at) }
     }
@@ -304,37 +304,37 @@ class Repo(private val ctx: Context) {
      * in the Repo's scope, so closing the sheet does not cancel a run that has already dropped the old one.
      */
     suspend fun pointAt(lat: Double, lon: Double): Pair<PointForecast, Instant>? {
-        val fc = flow.value.forecast
-        if (fc == null || !fc.region.contains(lat, lon)) scope.async { refresh(at = lat to lon) }.await()
-        val now = flow.value.forecast ?: return null
+        val current = flow.value.forecast
+        if (current == null || !current.region.contains(lat, lon)) scope.async { refresh(at = lat to lon) }.await()
+        val latest = flow.value.forecast ?: return null
         // the region's run failed: the old forecast's nearest edge would pass for an answer
-        if (!now.region.contains(lat, lon) && flow.value.problem.let { it is Problem.Network || it is Problem.Radar }) return null
-        return withContext(Dispatchers.Default) { now.point(lat, lon) } to now.issued
+        if (!latest.region.contains(lat, lon) && flow.value.problem.let { it is Problem.Network || it is Problem.Radar }) return null
+        return withContext(Dispatchers.Default) { latest.point(lat, lon) } to latest.issued
     }
 
     /** Following: home is where the phone is, checked before every cycle. Without a fix, home stays put. */
     private suspend fun follow() {
         if (!prefs.value.followLocation) return
-        val l = Locator.fix(ctx) ?: return
-        if (Locator.moved(prefs.value.home, l.latitude, l.longitude))
-            prefs.update { it.copy(homeLat = l.latitude, homeLon = l.longitude) }
+        val location = Locator.fix(ctx) ?: return
+        if (Locator.moved(prefs.value.home, location.latitude, location.longitude))
+            prefs.update { it.copy(homeLat = location.latitude, homeLon = location.longitude) }
     }
 
     /** [manual]: picked on the map or by hand, which stops following; a live fix keeps it on. */
     suspend fun setHome(lat: Double, lon: Double, manual: Boolean = true) {
         prefs.update { it.copy(homeLat = lat, homeLon = lon, followLocation = it.followLocation && !manual) }
-        val fc = flow.value.forecast
-        if (fc != null && fc.region.contains(lat, lon) && !openMeteo)
-            flow.update { it.copy(point = fc.point(lat, lon), issued = fc.issued) }
+        val current = flow.value.forecast
+        if (current != null && current.region.contains(lat, lon) && !openMeteo)
+            flow.update { it.copy(point = current.point(lat, lon), issued = current.issued) }
         scope.launch { refresh() }        // not the caller's scope: leaving the map must not cancel the run
     }
 
     /** Snapshot for the widgets from either run, then re-render them all, so their age stays true even when a run failed. */
-    private suspend fun publish(fc: Forecast?, p: PointForecast?, full: Boolean) {
+    private suspend fun publish(forecast: Forecast?, point: PointForecast?, full: Boolean) {
         val home = prefs.value.home
-        if (p != null && fc != null && fc.region.contains(home.first, home.second)) withContext(Dispatchers.IO) {
+        if (point != null && forecast != null && forecast.region.contains(home.first, home.second)) withContext(Dispatchers.IO) {
             val now = Instant.now()
-            runCatching { Snapshot.of(fc, p, OutlookBars.join(flow.value.outlook, p, fc.issued, now), home, full, now).write(ctx.filesDir) }
+            runCatching { Snapshot.of(forecast, point, OutlookBars.join(flow.value.outlook, point, forecast.issued, now), home, full, now).write(ctx.filesDir) }
         }
         runCatching { Widgets.updateAll(ctx) }
     }

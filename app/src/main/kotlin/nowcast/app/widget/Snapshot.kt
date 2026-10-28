@@ -22,7 +22,7 @@ import kotlin.math.roundToInt
  */
 @Serializable
 data class Snapshot(
-    val v: Int = VERSION,
+    val version: Int = VERSION,
     val issued: Long,
     val written: Long,
     val region: String,
@@ -32,7 +32,7 @@ data class Snapshot(
     val mean: List<Float>,
     val p10: List<Float>,
     val p90: List<Float>,
-    val prob: List<Float>,
+    val probability: List<Float>,
     val bars: List<SBar> = emptyList(),
     val radar: SRadar? = null,
     /** What the age counts from: "radar", or "Open-Meteo" when the nowcast is model output. */
@@ -44,23 +44,23 @@ data class Snapshot(
     fun summary(now: Instant): String =
         if (minutes.isEmpty()) "No forecast yet · open the app"
         else nowcast.engine.forecast.summary(minutes.toIntArray(), DoubleArray(mean.size) { mean[it].toDouble() },
-            DoubleArray(prob.size) { prob[it].toDouble() }, age(now))
+            DoubleArray(probability.size) { probability[it].toDouble() }, age(now))
 
     /** Highest chance from now to the end of the series; null once the series is all in the past. */
     fun chance(now: Instant): Int? {
-        val a = age(now)
-        return minutes.indices.filter { minutes[it] >= a }.maxOfOrNull { prob[it] }?.let { Math.rint(100.0 * it).toInt() }
+        val ageNow = age(now)
+        return minutes.indices.filter { minutes[it] >= ageNow }.maxOfOrNull { probability[it] }?.let { Math.rint(100.0 * it).toInt() }
     }
 
     fun engineBars(): List<Bar> = bars.map {
-        Bar(Instant.ofEpochSecond(it.start), it.mm.toDouble(), it.p10.toDouble(), it.p90.toDouble(), it.prob.toDouble(),
+        Bar(Instant.ofEpochSecond(it.start), it.mm.toDouble(), it.p10.toDouble(), it.p90.toDouble(), it.probability.toDouble(),
             if (it.nowcast) BarSource.NOWCAST else BarSource.MODEL)
     }
 
     fun write(dir: File) {
-        val f = File(dir, FILE); val tmp = File(dir, "$FILE.tmp")
+        val target = File(dir, FILE); val tmp = File(dir, "$FILE.tmp")
         tmp.writeText(json.encodeToString(this))
-        if (!tmp.renameTo(f)) { f.delete(); tmp.renameTo(f) }      // rename replaces atomically on Android
+        if (!tmp.renameTo(target)) { target.delete(); tmp.renameTo(target) }      // rename replaces atomically on Android
     }
 
     companion object {
@@ -74,43 +74,43 @@ data class Snapshot(
 
         fun read(dir: File): Snapshot? = runCatching { decode(File(dir, FILE).readText()) }.getOrNull()
         fun decode(text: String): Snapshot? = runCatching { json.decodeFromString<Snapshot>(text) }.getOrNull()
-            ?.takeIf { it.v == VERSION && it.minutes.size == it.mean.size && it.mean.size == it.prob.size &&
+            ?.takeIf { it.version == VERSION && it.minutes.size == it.mean.size && it.mean.size == it.probability.size &&
                 it.p10.size == it.mean.size && it.p90.size == it.mean.size }
-        fun encode(s: Snapshot): String = json.encodeToString(s)
+        fun encode(snapshot: Snapshot): String = json.encodeToString(snapshot)
 
         fun box(lat: Double, lon: Double): List<Double> {
             val dLat = HALF_KM / 110.57; val dLon = HALF_KM / (111.32 * cos(Math.toRadians(lat)))
             return listOf(lon - dLon, lat - dLat, lon + dLon, lat + dLat)
         }
 
-        /** From any run's forecast: [fc] may be the full region or the box around home. */
-        fun of(fc: Forecast, p: PointForecast, bars: List<Bar?>, home: Pair<Double, Double>, full: Boolean,
+        /** From any run's forecast: [forecast] may be the full region or the box around home. */
+        fun of(forecast: Forecast, point: PointForecast, bars: List<Bar?>, home: Pair<Double, Double>, full: Boolean,
                now: Instant = Instant.now()): Snapshot {
             val (lat, lon) = home
             val bbox = box(lat, lon)
-            val s = Render.mercatorSampler(fc.geo, bbox, width = RADAR_PX)
-            val step = fc.intervalMinutes
+            val sampler = Render.mercatorSampler(forecast.geo, bbox, width = RADAR_PX)
+            val step = forecast.intervalMinutes
             val frames = LEADS.map { lead ->
-                val field = if (lead == 0) fc.past.last().rain.v.let { v -> FloatArray(v.size) { v[it].toFloat() } }
-                else fc.mean[(lead / step - 1).coerceIn(0, fc.mean.size - 1)]
-                val actual = if (lead == 0) 0 else ((lead / step).coerceIn(1, fc.mean.size)) * step
-                SFrame(actual, Base64.getEncoder().encodeToString(Render.levels(field, fc.geo.h, fc.geo.w, s)))
+                val field = if (lead == 0) forecast.past.last().rain.values.let { values -> FloatArray(values.size) { values[it].toFloat() } }
+                else forecast.mean[(lead / step - 1).coerceIn(0, forecast.mean.size - 1)]
+                val actual = if (lead == 0) 0 else ((lead / step).coerceIn(1, forecast.mean.size)) * step
+                SFrame(actual, Base64.getEncoder().encodeToString(Render.levels(field, forecast.geo.rows, forecast.geo.cols, sampler)))
             }
-            fun f(a: DoubleArray) = a.map { (it * 100).roundToInt() / 100f }
+            fun rounded(values: DoubleArray) = values.map { (it * 100).roundToInt() / 100f }
             return Snapshot(
-                issued = fc.issued.epochSecond, written = now.epochSecond, region = fc.region.name, full = full,
-                minutes = p.minutes.toList(), mean = f(p.values), p10 = f(p.p10), p90 = f(p.p90), prob = f(p.probability),
+                issued = forecast.issued.epochSecond, written = now.epochSecond, region = forecast.region.name, full = full,
+                minutes = point.minutes.toList(), mean = rounded(point.values), p10 = rounded(point.p10), p90 = rounded(point.p90), probability = rounded(point.probability),
                 bars = bars.filterNotNull().map { SBar(it.start.epochSecond, it.mm.toFloat(), it.p10.toFloat(), it.p90.toFloat(),
                     it.probability.toFloat(), it.source == BarSource.NOWCAST) },
-                radar = SRadar(bbox, s.width, s.height, lat, lon, frames),
+                radar = SRadar(bbox, sampler.width, sampler.height, lat, lon, frames),
             )
         }
 
         /** Open-Meteo's point nowcast: no radar crop, so the radar widget says why it is empty. */
-        fun ofPoint(p: PointForecast, issued: Instant, bars: List<Bar?>, full: Boolean, now: Instant = Instant.now()): Snapshot {
-            fun f(a: DoubleArray) = a.map { (it * 100).roundToInt() / 100f }
+        fun ofPoint(point: PointForecast, issued: Instant, bars: List<Bar?>, full: Boolean, now: Instant = Instant.now()): Snapshot {
+            fun rounded(values: DoubleArray) = values.map { (it * 100).roundToInt() / 100f }
             return Snapshot(issued = issued.epochSecond, written = now.epochSecond, region = "Open-Meteo", full = full,
-                minutes = p.minutes.toList(), mean = f(p.values), p10 = f(p.p10), p90 = f(p.p90), prob = f(p.probability),
+                minutes = point.minutes.toList(), mean = rounded(point.values), p10 = rounded(point.p10), p90 = rounded(point.p90), probability = rounded(point.probability),
                 bars = bars.filterNotNull().map { SBar(it.start.epochSecond, it.mm.toFloat(), it.p10.toFloat(), it.p90.toFloat(),
                     it.probability.toFloat(), it.source == BarSource.NOWCAST) },
                 source = SOURCE_OPEN_METEO)
@@ -122,33 +122,33 @@ data class Snapshot(
         fun sample(now: Instant = Instant.now()): Snapshot {
             val issued = now.epochSecond - now.epochSecond % 300 - 300
             val minutes = (-55..60).toList()
-            val mean = minutes.map { m -> (2.4 * exp(-((m - 30.0) / 14).let { it * it })).toFloat() }
+            val mean = minutes.map { minute -> (2.4 * exp(-((minute - 30.0) / 14).let { it * it })).toFloat() }
             val bars = (0 until 96).map { i ->
-                val t0 = now.epochSecond - now.epochSecond % 1800 + 1800L * i
+                val start = now.epochSecond - now.epochSecond % 1800 + 1800L * i
                 val wet = (0.5 + 0.5 * kotlin.math.sin(i / 7.0)).toFloat() * (if (i in 30..50) 1f else 0.3f)
-                SBar(t0, 0.6f * wet * wet, 0.1f * wet, 1.4f * wet, wet, i < 2)
+                SBar(start, 0.6f * wet * wet, 0.1f * wet, 1.4f * wet, wet, i < 2)
             }
-            val px = RADAR_PX
-            val lv = ByteArray(px * px) { k ->
-                val x = k % px - 40.0; val y = k / px - 70.0
+            val side = RADAR_PX
+            val levels = ByteArray(side * side) { k ->
+                val x = k % side - 40.0; val y = k / side - 70.0
                 Render.level(6 * exp(-(x * x / 900 + y * y / 300)) + 0.6 * exp(-((x - 60) * (x - 60) + (y + 40) * (y + 40)) / 400.0)).toByte()
             }
-            val enc = Base64.getEncoder().encodeToString(lv)
+            val encoded = Base64.getEncoder().encodeToString(levels)
             val (lat, lon) = Settings.DEFAULT_HOME
             return Snapshot(issued = issued, written = now.epochSecond, region = "Belgium", minutes = minutes, mean = mean,
                 p10 = mean.map { it * 0.4f }, p90 = mean.map { it * 1.8f + 0.05f },
-                prob = minutes.map { m -> (0.75 * exp(-((m - 32.0) / 22).let { it * it })).toFloat() },
-                bars = bars, radar = SRadar(box(lat, lon), px, px, lat, lon, LEADS.map { SFrame(it, enc) }))
+                probability = minutes.map { minute -> (0.75 * exp(-((minute - 32.0) / 22).let { it * it })).toFloat() },
+                bars = bars, radar = SRadar(box(lat, lon), side, side, lat, lon, LEADS.map { SFrame(it, encoded) }))
         }
     }
 }
 
 @Serializable
-data class SBar(val start: Long, val mm: Float, val p10: Float, val p90: Float, val prob: Float, val nowcast: Boolean = false)
+data class SBar(val start: Long, val mm: Float, val p10: Float, val p90: Float, val probability: Float, val nowcast: Boolean = false)
 
 /** Render levels (0–255, [Render.level]) on a Mercator raster over [bbox] = lon0, lat0, lon1, lat1. */
 @Serializable
-data class SRadar(val bbox: List<Double>, val w: Int, val h: Int, val homeLat: Double, val homeLon: Double,
+data class SRadar(val bbox: List<Double>, val width: Int, val height: Int, val homeLat: Double, val homeLon: Double,
                   val frames: List<SFrame>) {
     fun frame(lead: Int): SFrame? = frames.minByOrNull { kotlin.math.abs(it.lead - lead) }
 }
@@ -166,13 +166,13 @@ object Freshness {
     fun stale(age: Int) = age >= STALE_MIN
 
     fun text(age: Int, source: String = "radar"): String {
-        val big = source.replaceFirstChar { it.uppercase() }
+        val capitalised = source.replaceFirstChar { it.uppercase() }
         return when {
             age < 1 -> "$source just now"
             age < STALE_MIN -> "$source $age min ago"
-            age < 120 -> "$big $age min old"
-            age < 48 * 60 -> "$big ${age / 60} h old"
-            else -> "$big ${age / 1440} days old"
+            age < 120 -> "$capitalised $age min old"
+            age < 48 * 60 -> "$capitalised ${age / 60} h old"
+            else -> "$capitalised ${age / 1440} days old"
         }
     }
 }

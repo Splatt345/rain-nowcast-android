@@ -57,11 +57,11 @@ class OutlookMeta(val models: List<String>, val ensemble: String, val trainedBbo
 
         /** Files exported before these keys existed are the Belgian model. */
         fun parse(json: String): OutlookMeta {
-            val o = Json.parseToJsonElement(json).jsonObject
+            val root = Json.parseToJsonElement(json).jsonObject
             return OutlookMeta(
-                o["models"]?.jsonArray?.map { it.jsonPrimitive.content } ?: BELGIUM.models,
-                o["ensemble"]?.jsonPrimitive?.contentOrNull ?: BELGIUM.ensemble,
-                o["trained_bbox"]?.jsonArray?.map { it.jsonPrimitive.double } ?: BELGIUM.trainedBbox)
+                root["models"]?.jsonArray?.map { it.jsonPrimitive.content } ?: BELGIUM.models,
+                root["ensemble"]?.jsonPrimitive?.contentOrNull ?: BELGIUM.ensemble,
+                root["trained_bbox"]?.jsonArray?.map { it.jsonPrimitive.double } ?: BELGIUM.trainedBbox)
         }
     }
 }
@@ -72,20 +72,20 @@ object OutlookFeatures {
         listOf("model_mean", "model_max", "sin_hour", "cos_hour", "sin_doy", "cos_doy", "lat", "lon", "lead_bucket")
 
     /** null at the series edges or when any model value is missing (training dropped those rows too). */
-    fun row(h: Hourly, j: Int, lat: Double, lon: Double, now: Instant,
+    fun row(hourly: Hourly, hour: Int, lat: Double, lon: Double, now: Instant,
             models: List<String> = OutlookMeta.BELGIUM.models): FloatArray? {
-        if (j <= 0 || j >= h.time.size - 1) return null
+        if (hour <= 0 || hour >= hourly.time.size - 1) return null
         // the trainer holds model values as float32
-        fun at(k: Int) = models.map { h.series[it]?.get(k)?.toFloat()?.toDouble() ?: Double.NaN }
-        val m = at(j); val prev = at(j - 1); val next = at(j + 1)
-        if ((m + prev + next).any { !it.isFinite() }) return null
-        val t = h.time[j].atOffset(ZoneOffset.UTC)
-        val hod = t.hour / 24.0 * 2 * PI
-        val doy = (t.dayOfYear - 1) / 365.25 * 2 * PI
-        val leadHours = Duration.between(now, h.time[j]).seconds / 3600.0
-        val v = m + prev + next + listOf(m.average(), m.max(), sin(hod), cos(hod), sin(doy), cos(doy),
+        fun at(index: Int) = models.map { hourly.series[it]?.get(index)?.toFloat()?.toDouble() ?: Double.NaN }
+        val current = at(hour); val prev = at(hour - 1); val next = at(hour + 1)
+        if ((current + prev + next).any { !it.isFinite() }) return null
+        val time = hourly.time[hour].atOffset(ZoneOffset.UTC)
+        val hourAngle = time.hour / 24.0 * 2 * PI
+        val dayAngle = (time.dayOfYear - 1) / 365.25 * 2 * PI
+        val leadHours = Duration.between(now, hourly.time[hour]).seconds / 3600.0
+        val features = current + prev + next + listOf(current.average(), current.max(), sin(hourAngle), cos(hourAngle), sin(dayAngle), cos(dayAngle),
             lat, lon, if (leadHours < 12) 0.0 else 1.0)
-        return FloatArray(v.size) { v[it].toFloat() }
+        return FloatArray(features.size) { features[it].toFloat() }
     }
 }
 
@@ -94,15 +94,15 @@ class OutlookModel(bytes: ByteArray, val meta: OutlookMeta = OutlookMeta.BELGIUM
     private val env = OrtEnvironment.getEnvironment()
     private val session: OrtSession = env.createSession(bytes, OrtSession.SessionOptions())
 
-    fun quantiles(x: List<FloatArray>): List<DoubleArray> {
-        if (x.isEmpty()) return emptyList()
-        val nf = x[0].size
-        val buf = FloatBuffer.allocate(x.size * nf).apply { x.forEach { put(it) }; rewind() }
-        return OnnxTensor.createTensor(env, buf, longArrayOf(x.size.toLong(), nf.toLong())).use { t ->
-            session.run(mapOf("x" to t)).use { res ->
+    fun quantiles(rows: List<FloatArray>): List<DoubleArray> {
+        if (rows.isEmpty()) return emptyList()
+        val featureCount = rows[0].size
+        val buf = FloatBuffer.allocate(rows.size * featureCount).apply { rows.forEach { put(it) }; rewind() }
+        return OnnxTensor.createTensor(env, buf, longArrayOf(rows.size.toLong(), featureCount.toLong())).use { input ->
+            session.run(mapOf("x" to input)).use { result ->
                 @Suppress("UNCHECKED_CAST")
-                (res.get("quantiles").get().value as Array<FloatArray>).map { q ->
-                    q.map { maxOf(0.0, it.toDouble()) }.sorted().toDoubleArray()
+                (result.get("quantiles").get().value as Array<FloatArray>).map { predicted ->
+                    predicted.map { maxOf(0.0, it.toDouble()) }.sorted().toDoubleArray()
                 }
             }
         }
@@ -117,81 +117,81 @@ object OpenMeteo {
 
     /** Every hourly key starting with "precipitation", the prefix stripped ("precipitation_icon_d2" -> "icon_d2"). */
     fun parse(json: String, block: String = "hourly"): Hourly {
-        val h = Json.parseToJsonElement(json).jsonObject[block]?.jsonObject
+        val data = Json.parseToJsonElement(json).jsonObject[block]?.jsonObject
             ?: throw OutlookException("Open-Meteo answered without $block data")
-        val time = h.getValue("time").jsonArray.map { LocalDateTime.parse(it.jsonPrimitive.content).toInstant(ZoneOffset.UTC) }
-        val series = h.filterKeys { it.startsWith("precipitation") }.map { (k, v) ->
-            k.removePrefix("precipitation").removePrefix("_").ifEmpty { "precipitation" } to
-                v.jsonArray.map { it.jsonPrimitive.doubleOrNull ?: Double.NaN }.toDoubleArray()
+        val time = data.getValue("time").jsonArray.map { LocalDateTime.parse(it.jsonPrimitive.content).toInstant(ZoneOffset.UTC) }
+        val series = data.filterKeys { it.startsWith("precipitation") }.map { (key, values) ->
+            key.removePrefix("precipitation").removePrefix("_").ifEmpty { "precipitation" } to
+                values.jsonArray.map { it.jsonPrimitive.doubleOrNull ?: Double.NaN }.toDoubleArray()
         }.toMap()
         return Hourly(time, series)
     }
 
     internal fun get(url: String): String {
-        val c = URI(url).toURL().openConnection() as HttpURLConnection
-        c.connectTimeout = 20_000; c.readTimeout = 30_000
-        c.setRequestProperty("User-Agent", "rain-nowcast-android")
-        if (c.responseCode !in 200..299) throw OutlookException("Open-Meteo HTTP ${c.responseCode}")
-        return c.inputStream.bufferedReader().readText()
+        val connection = URI(url).toURL().openConnection() as HttpURLConnection
+        connection.connectTimeout = 20_000; connection.readTimeout = 30_000
+        connection.setRequestProperty("User-Agent", "rain-nowcast-android")
+        if (connection.responseCode !in 200..299) throw OutlookException("Open-Meteo HTTP ${connection.responseCode}")
+        return connection.inputStream.bufferedReader().readText()
     }
 
-    private fun q(lat: Double, lon: Double) = "latitude=%.4f&longitude=%.4f".format(Locale.ROOT, lat, lon)
+    private fun coords(lat: Double, lon: Double) = "latitude=%.4f&longitude=%.4f".format(Locale.ROOT, lat, lon)
 
-    fun deterministic(lat: Double, lon: Double, models: List<String>): Hourly = parse(get("$DET?${q(lat, lon)}" +
+    fun deterministic(lat: Double, lon: Double, models: List<String>): Hourly = parse(get("$DET?${coords(lat, lon)}" +
         "&hourly=precipitation&models=${models.joinToString(",")}&timezone=GMT&past_days=1&forecast_days=3"))
 
     /** Every member, e.g. ICON-D2-EPS: control + 19. */
     fun ensemble(lat: Double, lon: Double, model: String): Hourly =
-        parse(get("$ENS?${q(lat, lon)}&hourly=precipitation&models=$model&timezone=GMT&forecast_days=3"))
+        parse(get("$ENS?${coords(lat, lon)}&hourly=precipitation&models=$model&timezone=GMT&forecast_days=3"))
 }
 
 object OutlookBars {
-    const val N = 96
+    const val BAR_COUNT = 96
     const val WET_MM = 0.1          // per 30 min
     private const val HALF = 1800L
 
     fun floor30(t: Instant): Instant = Instant.ofEpochSecond(Math.floorDiv(t.epochSecond, HALF) * HALF)
 
-    private fun halves(hourEnd: Instant, xs: DoubleArray, p10: Double, p90: Double, src: BarSource) =
+    private fun halves(hourEnd: Instant, values: DoubleArray, p10: Double, p90: Double, source: BarSource) =
         listOf(hourEnd.minusSeconds(2 * HALF), hourEnd.minusSeconds(HALF)).map {
-            Bar(it, xs.average(), p10, p90, xs.count { v -> v > WET_MM }.toDouble() / xs.size, src)
+            Bar(it, values.average(), p10, p90, values.count { value -> value > WET_MM }.toDouble() / values.size, source)
         }
 
     /** The GBM's 9 hourly quantiles as 9 members; each 30-min bar is half the hour. */
-    fun fromQuantiles(hourEnd: Instant, q: DoubleArray): List<Bar> {
-        val h = DoubleArray(q.size) { q[it] / 2 }.sorted().toDoubleArray()
-        return halves(hourEnd, h, h.first(), h.last(), BarSource.MODEL)
+    fun fromQuantiles(hourEnd: Instant, quantiles: DoubleArray): List<Bar> {
+        val halfHour = DoubleArray(quantiles.size) { quantiles[it] / 2 }.sorted().toDoubleArray()
+        return halves(hourEnd, halfHour, halfHour.first(), halfHour.last(), BarSource.MODEL)
     }
 
     fun fromMembers(hourEnd: Instant, members: DoubleArray): List<Bar> {
-        val h = members.filter { it.isFinite() }.map { it / 2 }.toDoubleArray()
-        if (h.size < 2) return emptyList()
-        return halves(hourEnd, h, percentile(h, 10.0), percentile(h, 90.0), BarSource.ENSEMBLE)
+        val halfHour = members.filter { it.isFinite() }.map { it / 2 }.toDoubleArray()
+        if (halfHour.size < 2) return emptyList()
+        return halves(hourEnd, halfHour, percentile(halfHour, 10.0), percentile(halfHour, 90.0), BarSource.ENSEMBLE)
     }
 
-    fun assemble(det: Hourly?, ens: Hourly?, model: ((List<FloatArray>) -> List<DoubleArray>)?,
+    fun assemble(deterministic: Hourly?, ensemble: Hourly?, model: ((List<FloatArray>) -> List<DoubleArray>)?,
                  lat: Double, lon: Double, now: Instant, meta: OutlookMeta = OutlookMeta.BELGIUM): Outlook {
-        val lo = floor30(now); val hi = lo.plusSeconds(HALF * (N + 2))
-        fun inWindow(t: Instant) = t > lo && t <= hi
+        val windowStart = floor30(now); val windowEnd = windowStart.plusSeconds(HALF * (BAR_COUNT + 2))
+        fun inWindow(t: Instant) = t > windowStart && t <= windowEnd
         val byHour = sortedMapOf<Instant, List<Bar>>()
         var note: String? = null
-        if (det != null && model != null) {
-            val js = det.time.indices.filter { inWindow(det.time[it]) }
-                .mapNotNull { j -> OutlookFeatures.row(det, j, lat, lon, now, meta.models)?.let { j to it } }
+        if (deterministic != null && model != null) {
+            val hours = deterministic.time.indices.filter { inWindow(deterministic.time[it]) }
+                .mapNotNull { hour -> OutlookFeatures.row(deterministic, hour, lat, lon, now, meta.models)?.let { hour to it } }
             try {
-                if (js.isNotEmpty()) model(js.map { it.second }).forEachIndexed { i, q ->
-                    val end = det.time[js[i].first]; byHour[end] = fromQuantiles(end, q)
+                if (hours.isNotEmpty()) model(hours.map { it.second }).forEachIndexed { index, quantiles ->
+                    val end = deterministic.time[hours[index].first]; byHour[end] = fromQuantiles(end, quantiles)
                 }
-            } catch (e: Exception) {
-                note = "Local outlook model failed (${e.message}); showing ${meta.ensembleName}"
+            } catch (problem: Exception) {
+                note = "Local outlook model failed (${problem.message}); showing ${meta.ensembleName}"
             }
         }
         val usedModel = byHour.isNotEmpty()
         if (!usedModel && note == null) note = "Local outlook model unavailable; showing ${meta.ensembleName}"
-        if (ens != null) for ((j, end) in ens.time.withIndex()) {
+        if (ensemble != null) for ((hour, end) in ensemble.time.withIndex()) {
             if (!inWindow(end) || end in byHour) continue
-            val b = fromMembers(end, ens.series.values.map { it[j] }.toDoubleArray())
-            if (b.isNotEmpty()) byHour[end] = b
+            val halves = fromMembers(end, ensemble.series.values.map { it[hour] }.toDoubleArray())
+            if (halves.isNotEmpty()) byHour[end] = halves
         }
         if (byHour.isEmpty()) throw OutlookException("No outlook data for this place")
         return Outlook(byHour.values.flatten(), now, usedModel, note, meta)
@@ -199,33 +199,33 @@ object OutlookBars {
 
     /** Nowcast for every bar its point curve fully covers (~ the first hour), the outlook after: a switch, not a blend. */
     fun join(outlook: Outlook?, point: PointForecast?, issued: Instant?, now: Instant): List<Bar?> {
-        val t0 = floor30(now)
+        val start = floor30(now)
         val fromOutlook = outlook?.bars?.associateBy { it.start } ?: emptyMap()
-        return List(N) { i ->
-            val s = t0.plusSeconds(HALF * i)
-            nowcastBar(point, issued, s) ?: fromOutlook[s]
+        return List(BAR_COUNT) { i ->
+            val barStart = start.plusSeconds(HALF * i)
+            nowcastBar(point, issued, barStart) ?: fromOutlook[barStart]
         }
     }
 
-    private fun nowcastBar(p: PointForecast?, issued: Instant?, s: Instant): Bar? {
-        if (p == null || issued == null) return null
-        val off = Duration.between(issued, s).seconds
-        if (off % 60 != 0L) return null
-        val first = (off / 60).toInt(); val last = first + 30
-        if (first < p.minutes.first() || last > p.minutes.last()) return null
-        val idx = p.minutes.indices.filter { p.minutes[it] in first until last }
-        return Bar(s, idx.sumOf { p.values[it] } / 60, idx.sumOf { p.p10[it] } / 60, idx.sumOf { p.p90[it] } / 60,
-            idx.maxOf { p.probability[it] }, BarSource.NOWCAST)
+    private fun nowcastBar(point: PointForecast?, issued: Instant?, start: Instant): Bar? {
+        if (point == null || issued == null) return null
+        val offsetSeconds = Duration.between(issued, start).seconds
+        if (offsetSeconds % 60 != 0L) return null
+        val first = (offsetSeconds / 60).toInt(); val last = first + 30
+        if (first < point.minutes.first() || last > point.minutes.last()) return null
+        val inBar = point.minutes.indices.filter { point.minutes[it] in first until last }
+        return Bar(start, inBar.sumOf { point.values[it] } / 60, inBar.sumOf { point.p10[it] } / 60, inBar.sumOf { point.p90[it] } / 60,
+            inBar.maxOf { point.probability[it] }, BarSource.NOWCAST)
     }
 
     private val DAY = DateTimeFormatter.ofPattern("EEE HH:mm", Locale.ENGLISH)
-    private val HM = DateTimeFormatter.ofPattern("HH:mm", Locale.ENGLISH)
-    private fun pct(p: Double) = Math.rint(100 * p).toInt()
-    private fun mm(x: Double) = "%.1f".format(Locale.ROOT, x)
+    private val TIME = DateTimeFormatter.ofPattern("HH:mm", Locale.ENGLISH)
+    private fun percent(probability: Double) = Math.rint(100 * probability).toInt()
+    private fun mm(value: Double) = "%.1f".format(Locale.ROOT, value)
 
-    fun label(b: Bar, zone: ZoneId): String =
-        "${DAY.format(b.start.atZone(zone))}–${HM.format(b.end.atZone(zone))} · ${pct(b.probability)}% · " +
-            "${mm(b.p10)}–${mm(b.p90)} mm"
+    fun label(bar: Bar, zone: ZoneId): String =
+        "${DAY.format(bar.start.atZone(zone))}–${TIME.format(bar.end.atZone(zone))} · ${percent(bar.probability)}% · " +
+            "${mm(bar.p10)}–${mm(bar.p90)} mm"
 
     fun sentence(bars: List<Bar?>, zone: ZoneId): String {
         val known = bars.filterNotNull()
@@ -234,11 +234,11 @@ object OutlookBars {
         if (wet != null) {
             val total = known.filter { it.start >= wet.start && it.start < wet.start.plusSeconds(6 * 3600) }.sumOf { it.mm }
             val whenText = if (wet === known.first()) "now" else "from ${DAY.format(wet.start.atZone(zone))}"
-            return "Rain likely $whenText (${pct(wet.probability)}%), about ${mm(total)} mm over the following 6 h"
+            return "Rain likely $whenText (${percent(wet.probability)}%), about ${mm(total)} mm over the following 6 h"
         }
         val best = known.maxBy { it.probability }
         if (best.probability >= 0.2)
-            return "Mostly dry; the best chance of rain is ${DAY.format(best.start.atZone(zone))} (${pct(best.probability)}%)"
+            return "Mostly dry; the best chance of rain is ${DAY.format(best.start.atZone(zone))} (${percent(best.probability)}%)"
         val hours = Duration.between(known.first().start, known.last().end).toHours()
         return if (hours == 1L) "Dry for the next hour" else "Dry for the next $hours hours"
     }
@@ -249,19 +249,19 @@ fun fetchOutlook(lat: Double, lon: Double, given: OutlookModel?, now: Instant = 
     val meta = given?.meta ?: OutlookMeta.BELGIUM
     val outside = given != null && !meta.trainedAt(lat, lon)
     val model = given.takeIf { !outside }
-    val det = runCatching { OpenMeteo.deterministic(lat, lon, meta.models) }.getOrNull()
-    val first = runCatching { OutlookBars.assemble(det, null, model?.let { m -> m::quantiles }, lat, lon, now, meta) }.getOrNull()
+    val deterministic = runCatching { OpenMeteo.deterministic(lat, lon, meta.models) }.getOrNull()
+    val first = runCatching { OutlookBars.assemble(deterministic, null, model?.let { loaded -> loaded::quantiles }, lat, lon, now, meta) }.getOrNull()
     // the ensemble fills hours the model could not cover (D2 ends near +48 h, a missing value, a failure)
     val complete = first != null && first.usedModel &&
-        first.bars.last().end >= OutlookBars.floor30(now).plusSeconds(1800L * OutlookBars.N)
+        first.bars.last().end >= OutlookBars.floor30(now).plusSeconds(1800L * OutlookBars.BAR_COUNT)
     if (complete) return first!!
     var shown = meta
-    val ens = runCatching { OpenMeteo.ensemble(lat, lon, meta.ensemble) }.getOrNull()
+    val ensemble = runCatching { OpenMeteo.ensemble(lat, lon, meta.ensemble) }.getOrNull()
         ?: runCatching { OpenMeteo.ensemble(lat, lon, OutlookMeta.GLOBAL_ENSEMBLE) }.getOrNull()
             ?.also { shown = OutlookMeta(meta.models, OutlookMeta.GLOBAL_ENSEMBLE, meta.trainedBbox) }
-    if (det == null && ens == null) throw OutlookException("Open-Meteo unreachable")
-    val o = OutlookBars.assemble(det, ens, model?.let { m -> m::quantiles }, lat, lon, now, shown)
-    return if (outside) Outlook(o.bars, o.fetched, false,
+    if (deterministic == null && ensemble == null) throw OutlookException("Open-Meteo unreachable")
+    val outlook = OutlookBars.assemble(deterministic, ensemble, model?.let { loaded -> loaded::quantiles }, lat, lon, now, shown)
+    return if (outside) Outlook(outlook.bars, outlook.fetched, false,
         "Outside the area the local outlook model was trained on; showing ${shown.ensembleName}", shown)
-    else o
+    else outlook
 }

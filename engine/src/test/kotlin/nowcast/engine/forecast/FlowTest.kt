@@ -13,7 +13,7 @@ class FlowTest {
     }
 
     @Test fun blurMatchesPython() {
-        assertClose(Fixture.arr("blur_r2"), blur(Fixture.frames()[0], 2).v, 1e-12, "blur")
+        assertClose(Fixture.arr("blur_r2"), blur(Fixture.frames()[0], 2).values, 1e-12, "blur")
     }
 
     @Test fun samplingAgreesWithHandValues() {
@@ -26,7 +26,7 @@ class FlowTest {
     @Test fun motionMatchesPython() {
         val db = Fixture.frames().takeLast(3).map { g -> g.map(::toDb) }
         val m = motion(db)
-        assertClose(Fixture.arr("vx"), m.vx.v, 1e-6, "vx")
-        assertClose(Fixture.arr("vy"), m.vy.v, 1e-6, "vy")
+        assertClose(Fixture.arr("vx"), m.vx.values, 1e-6, "vx")
+        assertClose(Fixture.arr("vy"), m.vy.values, 1e-6, "vy")
     }
 }

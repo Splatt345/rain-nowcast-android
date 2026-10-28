@@ -64,7 +64,7 @@ class MainActivity : ComponentActivity() {
 
     companion object {
         private const val TAB = "tab"
-        private fun tabOf(i: Intent?) = i?.getStringExtra(TAB)?.let { t -> Tab.entries.firstOrNull { it.name == t } }
+        private fun tabOf(intent: Intent?) = intent?.getStringExtra(TAB)?.let { name -> Tab.entries.firstOrNull { it.name == name } }
         fun intent(ctx: Context, tab: Tab): Intent = Intent(ctx, MainActivity::class.java).putExtra(TAB, tab.name)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP)
     }
@@ -78,7 +78,7 @@ private fun Root(repo: Repo, asked: MutableState<Tab?>) {
     AnimatedContent(ready, label = "root", transitionSpec = { fadeIn(tween(300)) togetherWith fadeOut(tween(200)) }) { ok ->
         if (!ok) FirstRun(
             onKey = { repo.secrets.set(Repo.SOURCE_OPERA, it) },
-            onOpenMeteo = { repo.prefs.update { s -> s.copy(nowcastSource = NowcastSource.OPEN_METEO) }; repo.kick(force = true) },
+            onOpenMeteo = { repo.prefs.update { current -> current.copy(nowcastSource = NowcastSource.OPEN_METEO) }; repo.kick(force = true) },
         ) else Main(repo, asked)
     }
 }
@@ -103,8 +103,8 @@ private fun Main(repo: Repo, asked: MutableState<Tab?>) {
     LaunchedEffect(lifecycle, settings.followLocation) {
         if (!settings.followLocation) return@LaunchedEffect
         lifecycle.repeatOnLifecycle(Lifecycle.State.STARTED) {
-            Locator.updates(ctx).collect { l ->
-                if (Locator.moved(repo.prefs.value.home, l.latitude, l.longitude)) repo.setHome(l.latitude, l.longitude, manual = false)
+            Locator.updates(ctx).collect { location ->
+                if (Locator.moved(repo.prefs.value.home, location.latitude, location.longitude)) repo.setHome(location.latitude, location.longitude, manual = false)
             }
         }
     }
@@ -123,7 +123,7 @@ private fun Main(repo: Repo, asked: MutableState<Tab?>) {
     }) {
         Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surface) {
             when (tab) {
-                Tab.NOW -> NowScreen(state, now, settings.view, { v -> repo.prefs.update { it.copy(view = v) } },
+                Tab.NOW -> NowScreen(state, now, settings.view, { chosen -> repo.prefs.update { it.copy(view = chosen) } },
                     { repo.kick(force = true) }, { tab = Tab.SETTINGS },
                     { repo.prefs.update { it.copy(nowcastSource = NowcastSource.OPEN_METEO) }; repo.kick(force = true) },
                     Modifier.statusBarsPadding())

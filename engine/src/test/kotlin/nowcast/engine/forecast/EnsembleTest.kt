@@ -21,14 +21,14 @@ class EnsembleTest {
     private val half = w / 2 + 1
     private fun halfOf(full: DoubleArray) = DoubleArray(h * half) { full[(it / half) * w + it % half] }
     private val mo get() = Motion(Grid(h, w, F.arr("vx")), Grid(h, w, F.arr("vy")))
-    private fun db() = F.frames().takeLast(3).map { g -> g.map(::toDb).v }
+    private fun db() = F.frames().takeLast(3).map { g -> g.map(::toDb).values }
 
     @Test fun fftMatchesNumpy() {
-        val re = F.frames()[0].v.copyOf(); val im = DoubleArray(h * w)
+        val re = F.frames()[0].values.copyOf(); val im = DoubleArray(h * w)
         Fft2(h, w).forward(re, im)
         assertClose(F.arr("fft_re"), re, 1e-10, "fft re"); assertClose(F.arr("fft_im"), im, 1e-10, "fft im")
         Fft2(h, w).inverse(re, im)
-        assertClose(F.frames()[0].v, re, 1e-12, "ifft")
+        assertClose(F.frames()[0].values, re, 1e-12, "ifft")
         // against a naive DFT; 331 and 397 take Bluestein
         for (n in listOf(1, 2, 7, 13, 37, 64, 191, 331, 338, 364, 366, 382, 397)) {
             val x = DoubleArray(n) { kotlin.math.sin(1.3 * it * it) }; val y = DoubleArray(n) { kotlin.math.cos(0.7 * it) }
@@ -59,7 +59,7 @@ class EnsembleTest {
         val s = setup(db(), mo)!!
         assertEquals(2, s.p)
         assertClose(F.arr("last"), s.last, 1e-12, "last")
-        assertClose(F.arr("noise_filter"), halfOf(s.filt), 1e-9, "noise filter")
+        assertClose(F.arr("noise_filter"), halfOf(s.filter), 1e-9, "noise filter")
         assertClose(F.arr("levels_last"), decompose(s.last, bandpass(h, w), Fft2(h, w)).levels.flatMap { it.toList() }.toDoubleArray(), 1e-9, "levels")
         assertClose(F.arr("mu"), s.mu, 1e-9, "mu")
         assertClose(F.arr("sd"), s.sd, 1e-9, "sd")
@@ -89,7 +89,7 @@ class EnsembleTest {
 
     @Test fun ar1PathMatches() {
         val fr = F.frames().toMutableList(); fr[fr.size - 3] = Grid(h, w)
-        val d = fr.takeLast(3).map { g -> g.map(::toDb).v }
+        val d = fr.takeLast(3).map { g -> g.map(::toDb).values }
         val m1 = Motion(Grid(h, w, F.arr("ar1_vx")), Grid(h, w, F.arr("ar1_vy")))
         val s1 = setup(d, m1)!!
         assertEquals(F.num("ar1_p").toInt(), s1.p)

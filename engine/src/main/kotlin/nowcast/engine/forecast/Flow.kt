@@ -12,53 +12,53 @@ private const val FILL_RADIUS = 40
 private const val FILL_PASSES = 2
 private const val EPS = 1e-6
 
-fun lkPair(a: Grid, b: Grid): Triple<Grid, Grid, Grid> {
-    val pa = mutableListOf(a); val pb = mutableListOf(b)
-    repeat(LEVELS - 1) { pa += down2(pa.last()); pb += down2(pb.last()) }
-    var vx = Grid(pa.last().h, pa.last().w); var vy = Grid(vx.h, vx.w)
-    var conf = Grid(a.h, a.w)
-    for (lvl in LEVELS - 1 downTo 0) {
-        val A = pa[lvl]; val B = pb[lvl]; val h = A.h; val w = A.w
-        if (vx.h != h || vx.w != w) { vx = up2(vx, h, w).map { 2 * it }; vy = up2(vy, h, w).map { 2 * it } }
-        var det = Grid(h, w)
+fun lkPair(first: Grid, second: Grid): Triple<Grid, Grid, Grid> {
+    val firstPyramid = mutableListOf(first); val secondPyramid = mutableListOf(second)
+    repeat(LEVELS - 1) { firstPyramid += down2(firstPyramid.last()); secondPyramid += down2(secondPyramid.last()) }
+    var vx = Grid(firstPyramid.last().rows, firstPyramid.last().cols); var vy = Grid(vx.rows, vx.cols)
+    var confidence = Grid(first.rows, first.cols)
+    for (level in LEVELS - 1 downTo 0) {
+        val levelFirst = firstPyramid[level]; val levelSecond = secondPyramid[level]; val rows = levelFirst.rows; val cols = levelFirst.cols
+        if (vx.rows != rows || vx.cols != cols) { vx = up2(vx, rows, cols).map { 2 * it }; vy = up2(vy, rows, cols).map { 2 * it } }
+        var det = Grid(rows, cols)
         repeat(ITERS) {
-            val bw = Grid(h, w)
-            for (r in 0 until h) for (c in 0 until w) bw[r, c] = sampleClamped(B, r + vy[r, c], c + vx[r, c])
-            val m = Grid(h, w, DoubleArray(h * w) { 0.5 * (A.v[it] + bw.v[it]) })
-            val px = shift(m, 0, 1); val nx = shift(m, 0, -1); val py = shift(m, 1, 0); val ny = shift(m, -1, 0)
-            val ix = DoubleArray(h * w) { 0.5 * (px.v[it] - nx.v[it]) }
-            val iy = DoubleArray(h * w) { 0.5 * (py.v[it] - ny.v[it]) }
-            val it_ = DoubleArray(h * w) { bw.v[it] - A.v[it] }
-            fun s(f: (Int) -> Double) = blur(Grid(h, w, DoubleArray(h * w, f)), WINDOW)
-            val sxx = s { ix[it] * ix[it] }; val syy = s { iy[it] * iy[it] }; val sxy = s { ix[it] * iy[it] }
-            val sxt = s { ix[it] * it_[it] }; val syt = s { iy[it] * it_[it] }
-            det = Grid(h, w, DoubleArray(h * w) { sxx.v[it] * syy.v[it] - sxy.v[it] * sxy.v[it] })
-            for (i in 0 until h * w) {
-                val d = det.v[i]
-                if (d > EPS) {
-                    vx.v[i] += -(syy.v[i] * sxt.v[i] - sxy.v[i] * syt.v[i]) / d
-                    vy.v[i] += -(sxx.v[i] * syt.v[i] - sxy.v[i] * sxt.v[i]) / d
+            val warped = Grid(rows, cols)
+            for (row in 0 until rows) for (col in 0 until cols) warped[row, col] = sampleClamped(levelSecond, row + vy[row, col], col + vx[row, col])
+            val average = Grid(rows, cols, DoubleArray(rows * cols) { 0.5 * (levelFirst.values[it] + warped.values[it]) })
+            val right = shift(average, 0, 1); val left = shift(average, 0, -1); val down = shift(average, 1, 0); val up = shift(average, -1, 0)
+            val gradX = DoubleArray(rows * cols) { 0.5 * (right.values[it] - left.values[it]) }
+            val gradY = DoubleArray(rows * cols) { 0.5 * (down.values[it] - up.values[it]) }
+            val gradT = DoubleArray(rows * cols) { warped.values[it] - levelFirst.values[it] }
+            fun windowSum(term: (Int) -> Double) = blur(Grid(rows, cols, DoubleArray(rows * cols, term)), WINDOW)
+            val sxx = windowSum { gradX[it] * gradX[it] }; val syy = windowSum { gradY[it] * gradY[it] }; val sxy = windowSum { gradX[it] * gradY[it] }
+            val sxt = windowSum { gradX[it] * gradT[it] }; val syt = windowSum { gradY[it] * gradT[it] }
+            det = Grid(rows, cols, DoubleArray(rows * cols) { sxx.values[it] * syy.values[it] - sxy.values[it] * sxy.values[it] })
+            for (i in 0 until rows * cols) {
+                val value = det.values[i]
+                if (value > EPS) {
+                    vx.values[i] += -(syy.values[i] * sxt.values[i] - sxy.values[i] * syt.values[i]) / value
+                    vy.values[i] += -(sxx.values[i] * syt.values[i] - sxy.values[i] * sxt.values[i]) / value
                 }
             }
         }
-        conf = det.map { maxOf(it, 0.0) }
+        confidence = det.map { maxOf(it, 0.0) }
     }
-    return Triple(vx, vy, conf)
+    return Triple(vx, vy, confidence)
 }
 
 /** Last two pairs, confidence-weighted, filled into dry areas. */
 fun motion(db: List<Grid>, par: Par = Par.SERIAL): Motion {
-    val last = db.last(); val n = last.h * last.w
-    var fx = Grid(last.h, last.w); var fy = Grid(last.h, last.w); var fc = Grid(last.h, last.w)
+    val last = db.last(); val cells = last.rows * last.cols
+    var sumX = Grid(last.rows, last.cols); var sumY = Grid(last.rows, last.cols); var weight = Grid(last.rows, last.cols)
     val pairs = listOf(db[db.size - 3] to db[db.size - 2], db[db.size - 2] to db[db.size - 1])
     val flows = arrayOfNulls<Triple<Grid, Grid, Grid>>(2)
-    Par(par.pool, minOf(par.ways, 2)).run(2) { a, b -> for (k in a until b) flows[k] = lkPair(pairs[k].first, pairs[k].second) }
+    Par(par.pool, minOf(par.ways, 2)).run(2) { start, end -> for (k in start until end) flows[k] = lkPair(pairs[k].first, pairs[k].second) }
     for (flow in flows) {
-        val (vx, vy, c) = flow!!
-        for (i in 0 until n) { fx.v[i] += c.v[i] * vx.v[i]; fy.v[i] += c.v[i] * vy.v[i]; fc.v[i] += c.v[i] }
+        val (vx, vy, confidence) = flow!!
+        for (i in 0 until cells) { sumX.values[i] += confidence.values[i] * vx.values[i]; sumY.values[i] += confidence.values[i] * vy.values[i]; weight.values[i] += confidence.values[i] }
     }
-    repeat(FILL_PASSES) { fx = blur(fx, FILL_RADIUS); fy = blur(fy, FILL_RADIUS); fc = blur(fc, FILL_RADIUS) }
+    repeat(FILL_PASSES) { sumX = blur(sumX, FILL_RADIUS); sumY = blur(sumY, FILL_RADIUS); weight = blur(weight, FILL_RADIUS) }
     return Motion(
-        Grid(last.h, last.w, DoubleArray(n) { if (fc.v[it] > 0) fx.v[it] / fc.v[it] else 0.0 }),
-        Grid(last.h, last.w, DoubleArray(n) { if (fc.v[it] > 0) fy.v[it] / fc.v[it] else 0.0 }))
+        Grid(last.rows, last.cols, DoubleArray(cells) { if (weight.values[it] > 0) sumX.values[it] / weight.values[it] else 0.0 }),
+        Grid(last.rows, last.cols, DoubleArray(cells) { if (weight.values[it] > 0) sumY.values[it] / weight.values[it] else 0.0 }))
 }

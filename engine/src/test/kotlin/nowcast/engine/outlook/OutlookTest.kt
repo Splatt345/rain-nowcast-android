@@ -81,7 +81,7 @@ class OutlookTest {
             DoubleArray(116), 0.7, "x", true)
         val o = OutlookBars.assemble(det, null, { x -> x.map { q } }, 50.85, 4.35, now)
         val bars = OutlookBars.join(o, p, issued, now)
-        assertEquals(OutlookBars.N, bars.size)
+        assertEquals(OutlookBars.BAR_COUNT, bars.size)
         assertEquals(t("12:00"), bars[0]!!.start)
         assertEquals(BarSource.NOWCAST, bars[0]!!.source); assertEquals(BarSource.NOWCAST, bars[1]!!.source)
         assertEquals(0.6, bars[0]!!.mm, 1e-9); assertEquals(0.7, bars[1]!!.probability, 1e-12)

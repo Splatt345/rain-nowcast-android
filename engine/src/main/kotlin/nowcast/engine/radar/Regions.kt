@@ -20,8 +20,8 @@ object Regions {
      *  edge, in km), so rain has the most room to arrive from; null outside them all. */
     fun pick(regions: List<Region>, lat: Double, lon: Double): Region? =
         regions.filter { it.contains(lat, lon) }.maxByOrNull {
-            val kx = 111.32 * Math.cos(Math.toRadians(lat))
-            minOf((lon - it.bbox[0]) * kx, (it.bbox[2] - lon) * kx,
+            val kmPerLon = 111.32 * Math.cos(Math.toRadians(lat))
+            minOf((lon - it.bbox[0]) * kmPerLon, (it.bbox[2] - lon) * kmPerLon,
                   (lat - it.bbox[1]) * 110.57, (it.bbox[3] - lat) * 110.57)
         }
 }

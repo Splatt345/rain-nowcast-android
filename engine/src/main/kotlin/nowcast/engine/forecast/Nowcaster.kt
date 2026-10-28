@@ -18,41 +18,41 @@ class Forecast(
 
     /** Twin of server.Nowcaster._point_state. */
     fun point(lat: Double, lon: Double, now: Instant = Instant.now()): PointForecast {
-        val h = geo.h; val w = geo.w
-        val (r0, c0) = geo.rowCol(lat, lon)
-        val inCoverage = r0 in 0 until h && c0 in 0 until w
-        val row = r0.coerceIn(0, h - 1); val col = c0.coerceIn(0, w - 1)
+        val rows = geo.rows; val cols = geo.cols
+        val (rawRow, rawCol) = geo.rowCol(lat, lon)
+        val inCoverage = rawRow in 0 until rows && rawCol in 0 until cols
+        val row = rawRow.coerceIn(0, rows - 1); val col = rawCol.coerceIn(0, cols - 1)
         val first = -intervalMinutes * (past.size - 1); val last = intervalMinutes * mean.size
         val minutes = IntArray(last - first + 1) { first + it }
-        val np = past.size
+        val pastCount = past.size
         // past frames as the float32 they are in the members' frame list, without copying them
-        fun curve(fut: (Int, Int) -> Float) = pointSeries(np + mean.size, h, w, motion, row, col, intervalMinutes, 1) { k, i ->
-            if (k < np) past[k].rain.v[i].toFloat().toDouble() else fut(k - np, i).toDouble() }
-        val series = curve { k, i -> mean[k][i] }
-        val curves = (0 until members.count).map { m -> curve { k, i -> members.at(m, k, i) } }
-        val prob = DoubleArray(minutes.size) { t -> curves.count { it[t] >= RAIN_THRESHOLD }.toDouble() / curves.size }
-        fun band(q: Double, lower: Boolean) = DoubleArray(minutes.size) { t ->
-            val p = percentile(DoubleArray(curves.size) { curves[it][t] }, q)
-            if (lower) minOf(p, series[t]) else maxOf(p, series[t])
+        fun curve(future: (Int, Int) -> Float) = pointSeries(pastCount + mean.size, rows, cols, motion, row, col, intervalMinutes, 1) { frame, cell ->
+            if (frame < pastCount) past[frame].rain.values[cell].toFloat().toDouble() else future(frame - pastCount, cell).toDouble() }
+        val series = curve { lead, cell -> mean[lead][cell] }
+        val curves = (0 until members.count).map { member -> curve { lead, cell -> members.at(member, lead, cell) } }
+        val probability = DoubleArray(minutes.size) { index -> curves.count { it[index] >= RAIN_THRESHOLD }.toDouble() / curves.size }
+        fun band(percent: Double, lower: Boolean) = DoubleArray(minutes.size) { index ->
+            val value = percentile(DoubleArray(curves.size) { curves[it][index] }, percent)
+            if (lower) minOf(value, series[index]) else maxOf(value, series[index])
         }
         val age = maxOf(0L, Duration.between(past.last().time, now).toMinutes()).toInt()
         val zero = minutes.indexOfFirst { it >= 0 }
         return PointForecast(
-            minutes, series, prob,
-            DoubleArray(minutes.size) { t -> minOf(curves.minOf { it[t] }, series[t]) },
+            minutes, series, probability,
+            DoubleArray(minutes.size) { index -> minOf(curves.minOf { it[index] }, series[index]) },
             band(10.0, true), band(25.0, true), band(75.0, false), band(90.0, false),
-            DoubleArray(minutes.size) { t -> maxOf(curves.maxOf { it[t] }, series[t]) },
-            prob.copyOfRange(zero, prob.size).max(), summary(minutes, series, prob, age), inCoverage)
+            DoubleArray(minutes.size) { index -> maxOf(curves.maxOf { it[index] }, series[index]) },
+            probability.copyOfRange(zero, probability.size).max(), summary(minutes, series, probability, age), inCoverage)
     }
 }
 
 internal fun medianGapMinutes(past: List<Frame>): Int =
-    past.zipWithNext { a, b -> Duration.between(a.time, b.time).toMinutes() }
+    past.zipWithNext { earlier, later -> Duration.between(earlier.time, later.time).toMinutes() }
         .filter { it > 0 }.sorted().let { if (it.isEmpty()) 5 else it[it.size / 2].toInt() }
 
-fun Frame.crop(r0: Int, c0: Int, h: Int, w: Int) = Frame(time,
-    Grid(h, w, DoubleArray(h * w) { rain[r0 + it / w, c0 + it % w] }),
-    GridGeo(geo.laea, geo.x1 + c0 * geo.px, geo.y2 - r0 * geo.py, geo.px, geo.py, h, w))
+fun Frame.crop(firstRow: Int, firstCol: Int, rows: Int, cols: Int) = Frame(time,
+    Grid(rows, cols, DoubleArray(rows * cols) { rain[firstRow + it / cols, firstCol + it % cols] }),
+    GridGeo(geo.laea, geo.left + firstCol * geo.pixelWidth, geo.top - firstRow * geo.pixelHeight, geo.pixelWidth, geo.pixelHeight, rows, cols))
 
 /** [dir]: where the members are memory-mapped (see [Members]); null keeps them in a direct buffer. */
 class Nowcaster(private val model: SmaatModel?, private val nMembers: Int = 10, private val seed: Long = 42,
@@ -61,33 +61,33 @@ class Nowcaster(private val model: SmaatModel?, private val nMembers: Int = 10, 
         val train = frames.map { it.rain }
         val geo = frames.last().geo
         // STEPS' velocity perturbations and incremental mask are in km and minutes
-        val ens = ensemble(train, 12, nMembers, seed, kmPerPixel = geo.px / 1000.0,
+        val result = ensemble(train, 12, nMembers, seed, kmPerPixel = geo.pixelWidth / 1000.0,
             timestep = medianGapMinutes(frames).toDouble(), dir = dir)
-        val timings = LinkedHashMap(ens.timings)
-        var members = ens.members; var used = false; var err: String? = null
+        val timings = LinkedHashMap(result.timings)
+        var members = result.members; var used = false; var error: String? = null
         if (model != null) {
             try {
-                var t = System.nanoTime()
-                val ml = model.forecast(train, 12)
-                timings["model"] = since(t); t = System.nanoTime()
-                val w = region.weights?.toDoubleArray() ?: Combine.WEIGHTS
-                members = Combine.combine(members, ml, w); used = true
-                timings["combine"] = since(t)
-            } catch (e: Exception) {
+                var start = System.nanoTime()
+                val modelFrames = model.forecast(train, 12)
+                timings["model"] = since(start); start = System.nanoTime()
+                val weights = region.weights?.toDoubleArray() ?: Combine.WEIGHTS
+                members = Combine.combine(members, modelFrames, weights); used = true
+                timings["combine"] = since(start)
+            } catch (problem: Exception) {
                 // A nowcast that stops because a network could not run is worse than one without it.
-                err = "${e::class.simpleName}: ${e.message}"
+                error = "${problem::class.simpleName}: ${problem.message}"
             }
         }
-        val t = System.nanoTime()
-        val n = ens.h * ens.w
-        val mean = Array(12) { k -> FloatArray(n) { i ->
-            var s = 0.0; var c = 0
-            for (m in 0 until members.count) { val x = members.at(m, k, i); if (!x.isNaN()) { s += x; c++ } }
-            if (c > 0) (s / c).toFloat() else Float.NaN
+        val start = System.nanoTime()
+        val cells = result.rows * result.cols
+        val mean = Array(12) { lead -> FloatArray(cells) { cell ->
+            var sum = 0.0; var count = 0
+            for (member in 0 until members.count) { val value = members.at(member, lead, cell); if (!value.isNaN()) { sum += value; count++ } }
+            if (count > 0) (sum / count).toFloat() else Float.NaN
         } }
-        timings["mean"] = since(t)
+        timings["mean"] = since(start)
         members.seal()
-        return Forecast(region, geo, frames, members, mean, ens.motion, frames.last().time, used, err, timings)
+        return Forecast(region, geo, frames, members, mean, result.motion, frames.last().time, used, error, timings)
     }
 
     /**
@@ -98,10 +98,10 @@ class Nowcaster(private val model: SmaatModel?, private val nMembers: Int = 10, 
      */
     fun runPoint(region: Region, frames: List<Frame>, lat: Double, lon: Double, boxKm: Double = 128.0,
                  now: Instant = Instant.now()): PointForecast {
-        val g = frames.last().geo
-        val (r, c) = g.rowCol(lat, lon)
-        val bh = minOf(g.h, (boxKm * 1000 / g.py).roundToInt()); val bw = minOf(g.w, (boxKm * 1000 / g.px).roundToInt())
-        val r0 = (r - bh / 2).coerceIn(0, g.h - bh); val c0 = (c - bw / 2).coerceIn(0, g.w - bw)
-        return run(region, frames.map { it.crop(r0, c0, bh, bw) }).point(lat, lon, now)
+        val geo = frames.last().geo
+        val (row, col) = geo.rowCol(lat, lon)
+        val boxRows = minOf(geo.rows, (boxKm * 1000 / geo.pixelHeight).roundToInt()); val boxCols = minOf(geo.cols, (boxKm * 1000 / geo.pixelWidth).roundToInt())
+        val firstRow = (row - boxRows / 2).coerceIn(0, geo.rows - boxRows); val firstCol = (col - boxCols / 2).coerceIn(0, geo.cols - boxCols)
+        return run(region, frames.map { it.crop(firstRow, firstCol, boxRows, boxCols) }).point(lat, lon, now)
     }
 }

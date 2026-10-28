@@ -39,104 +39,104 @@ import kotlin.math.roundToInt
 /**
  * The map's time control and home's rain in one: drag anywhere on it to pick the minute the map shows.
  * Radar on the left, forecast on the right, a tick for each real radar frame, the wall clock as "now".
- * [p] (minutes counted from [pIssued]) is drawn when there is one; the control works without it.
+ * [point] (minutes counted from [pointIssued]) is drawn when there is one; the control works without it.
  */
 @Composable
-fun MapTimeline(f: MapFrames, minute: Int, onMinute: (Int) -> Unit, p: PointForecast?, pIssued: Instant?, now: Instant,
+fun MapTimeline(frames: MapFrames, minute: Int, onMinute: (Int) -> Unit, point: PointForecast?, pointIssued: Instant?, now: Instant,
                 modifier: Modifier = Modifier) {
-    val cs = MaterialTheme.colorScheme
+    val colors = MaterialTheme.colorScheme
     val measurer = rememberTextMeasurer()
-    val label = MaterialTheme.typography.labelSmall.copy(color = cs.onSurfaceVariant)
+    val labelStyle = MaterialTheme.typography.labelSmall.copy(color = colors.onSurfaceVariant)
     val haptic = LocalHapticFeedback.current
     val pickMinute by rememberUpdatedState(onMinute)
     val zone = remember { ZoneId.systemDefault() }
-    val frameMinutes = remember(f) { f.times.indices.map(f::minuteOf).toSet() }
+    val frameMinutes = remember(frames) { frames.times.indices.map(frames::minuteOf).toSet() }
     // home's curve on the map's minute axis: (map minute, index into p)
-    val pts = remember(f, p, pIssued) {
-        if (p == null || pIssued == null) emptyList() else p.minutes.indices.mapNotNull { i ->
-            val m = Duration.between(f.times[0], pIssued.plusSeconds(60L * p.minutes[i])).toMinutes().toInt()
-            if (m in 0..f.minutes) m to i else null
+    val homeCurve = remember(frames, point, pointIssued) {
+        if (point == null || pointIssued == null) emptyList() else point.minutes.indices.mapNotNull { i ->
+            val mapMinute = Duration.between(frames.times[0], pointIssued.plusSeconds(60L * point.minutes[i])).toMinutes().toInt()
+            if (mapMinute in 0..frames.minutes) mapMinute to i else null
         }
     }
-    val yMax = remember(pts) { niceCeil(maxOf(1.0, (pts.maxOfOrNull { (_, i) -> maxOf(p!!.p90[i], p.values[i]) } ?: 0.0) * 1.15)) }
-    val nowMin = Duration.between(f.times[0], now).toMinutes().toInt()
-    val issuedMin = Duration.between(f.times[0], f.issued).toMinutes().toInt()
+    val yMax = remember(homeCurve) { niceCeil(maxOf(1.0, (homeCurve.maxOfOrNull { (_, i) -> maxOf(point!!.p90[i], point.values[i]) } ?: 0.0) * 1.15)) }
+    val nowMin = Duration.between(frames.times[0], now).toMinutes().toInt()
+    val issuedMin = Duration.between(frames.times[0], frames.issued).toMinutes().toInt()
 
     Canvas(modifier.fillMaxWidth().height(104.dp)
         .semantics {
             contentDescription = "Timeline. Drag to choose the time shown on the map."
-            stateDescription = HM.format(f.time(minute).atZone(zone))
-            setProgress { v -> onMinute(v.roundToInt().coerceIn(0, f.minutes)); true }
+            stateDescription = TIME_FORMAT.format(frames.time(minute).atZone(zone))
+            setProgress { progress -> onMinute(progress.roundToInt().coerceIn(0, frames.minutes)); true }
         }
-        .pointerInput(f) {
+        .pointerInput(frames) {
             val pad = 12.dp.toPx()
             var last = -1
             fun pick(x: Float) {
-                val m = (((x - pad) / (size.width - 2 * pad)) * f.minutes).roundToInt().coerceIn(0, f.minutes)
-                if (m != last) {
-                    last = m; pickMinute(m)
-                    if (m in frameMinutes) haptic.performHapticFeedback(HapticFeedbackType.SegmentFrequentTick)
+                val picked = (((x - pad) / (size.width - 2 * pad)) * frames.minutes).roundToInt().coerceIn(0, frames.minutes)
+                if (picked != last) {
+                    last = picked; pickMinute(picked)
+                    if (picked in frameMinutes) haptic.performHapticFeedback(HapticFeedbackType.SegmentFrequentTick)
                 }
             }
             awaitEachGesture {
                 val down = awaitFirstDown(); pick(down.position.x)
                 do {
-                    val e = awaitPointerEvent()
-                    e.changes.firstOrNull()?.let { c ->
-                        pick(c.position.x)
-                        if (abs(c.position.x - c.previousPosition.x) > abs(c.position.y - c.previousPosition.y)) c.consume()
+                    val event = awaitPointerEvent()
+                    event.changes.firstOrNull()?.let { change ->
+                        pick(change.position.x)
+                        if (abs(change.position.x - change.previousPosition.x) > abs(change.position.y - change.previousPosition.y)) change.consume()
                     }
-                } while (e.changes.any { it.pressed })
+                } while (event.changes.any { it.pressed })
             }
         }) {
         val left = 12.dp.toPx(); val right = size.width - 12.dp.toPx()
         val top = 16.dp.toPx(); val bottom = size.height - 26.dp.toPx()
-        fun x(m: Int) = left + m.toFloat() / f.minutes.coerceAtLeast(1) * (right - left)
-        fun y(v: Double) = bottom - (v / yMax).toFloat().coerceIn(0f, 1.04f) * (bottom - top)
-        val split = x(issuedMin.coerceIn(0, f.minutes))
+        fun x(mapMinute: Int) = left + mapMinute.toFloat() / frames.minutes.coerceAtLeast(1) * (right - left)
+        fun y(value: Double) = bottom - (value / yMax).toFloat().coerceIn(0f, 1.04f) * (bottom - top)
+        val split = x(issuedMin.coerceIn(0, frames.minutes))
 
-        drawRoundRect(cs.onSurface.copy(alpha = 0.05f), Offset(left, top), Size(split - left, bottom - top), CornerRadius(6.dp.toPx()))
-        drawRoundRect(cs.primary.copy(alpha = 0.10f), Offset(split, top), Size(right - split, bottom - top), CornerRadius(6.dp.toPx()))
-        drawText(measurer, "RADAR", Offset(left + 6.dp.toPx(), top + 3.dp.toPx()), label)
-        drawText(measurer, "FORECAST", Offset(split + 6.dp.toPx(), top + 3.dp.toPx()), label.copy(color = cs.primary))
+        drawRoundRect(colors.onSurface.copy(alpha = 0.05f), Offset(left, top), Size(split - left, bottom - top), CornerRadius(6.dp.toPx()))
+        drawRoundRect(colors.primary.copy(alpha = 0.10f), Offset(split, top), Size(right - split, bottom - top), CornerRadius(6.dp.toPx()))
+        drawText(measurer, "RADAR", Offset(left + 6.dp.toPx(), top + 3.dp.toPx()), labelStyle)
+        drawText(measurer, "FORECAST", Offset(split + 6.dp.toPx(), top + 3.dp.toPx()), labelStyle.copy(color = colors.primary))
 
-        if (pts.isNotEmpty()) {
-            val q = p!!
+        if (homeCurve.isNotEmpty()) {
+            val home = point!!
             val band = Path().apply {
-                pts.forEachIndexed { k, (m, i) -> if (k == 0) moveTo(x(m), y(q.p90[i])) else lineTo(x(m), y(q.p90[i])) }
-                pts.asReversed().forEach { (m, i) -> lineTo(x(m), y(q.p10[i])) }
+                homeCurve.forEachIndexed { k, (mapMinute, i) -> if (k == 0) moveTo(x(mapMinute), y(home.p90[i])) else lineTo(x(mapMinute), y(home.p90[i])) }
+                homeCurve.asReversed().forEach { (mapMinute, i) -> lineTo(x(mapMinute), y(home.p10[i])) }
                 close()
             }
-            drawPath(band, cs.primary.copy(alpha = 0.18f))
-            val line = Path().apply { pts.forEachIndexed { k, (m, i) -> if (k == 0) moveTo(x(m), y(q.values[i])) else lineTo(x(m), y(q.values[i])) } }
-            drawPath(line, cs.primary, style = androidx.compose.ui.graphics.drawscope.Stroke(2.dp.toPx(), cap = StrokeCap.Round))
+            drawPath(band, colors.primary.copy(alpha = 0.18f))
+            val line = Path().apply { homeCurve.forEachIndexed { k, (mapMinute, i) -> if (k == 0) moveTo(x(mapMinute), y(home.values[i])) else lineTo(x(mapMinute), y(home.values[i])) } }
+            drawPath(line, colors.primary, style = androidx.compose.ui.graphics.drawscope.Stroke(2.dp.toPx(), cap = StrokeCap.Round))
             // above the plot, clear of the RADAR / FORECAST labels; the "now" label is near the middle
-            val peak = pts.maxOf { (_, i) -> q.values[i] }
-            val s = if (peak < 0.1) "home: dry" else "home: up to ${fmt(peak)} mm/h"
-            val w = measurer.measure(s, label).size.width
-            drawText(measurer, s, Offset(right - w, 0f), label.copy(color = cs.primary))
+            val peak = homeCurve.maxOf { (_, i) -> home.values[i] }
+            val caption = if (peak < 0.1) "home: dry" else "home: up to ${formatRate(peak)} mm/h"
+            val textWidth = measurer.measure(caption, labelStyle).size.width
+            drawText(measurer, caption, Offset(right - textWidth, 0f), labelStyle.copy(color = colors.primary))
         }
 
         // axis: a tick per radar frame, clock times on the half hour
-        drawLine(cs.outlineVariant, Offset(left, bottom), Offset(right, bottom), 1.dp.toPx())
-        for (m in frameMinutes) drawLine(cs.onSurfaceVariant.copy(alpha = 0.6f), Offset(x(m), bottom), Offset(x(m), bottom + 4.dp.toPx()), 1.dp.toPx())
-        for (m in 0..f.minutes) {
-            val t = f.time(m).atZone(zone)
-            if (t.minute % 30 != 0) continue
-            val s = HM.format(t); val w = measurer.measure(s, label).size.width
-            drawText(measurer, s, Offset((x(m) - w / 2f).coerceIn(0f, size.width - w), bottom + 6.dp.toPx()), label)
+        drawLine(colors.outlineVariant, Offset(left, bottom), Offset(right, bottom), 1.dp.toPx())
+        for (mapMinute in frameMinutes) drawLine(colors.onSurfaceVariant.copy(alpha = 0.6f), Offset(x(mapMinute), bottom), Offset(x(mapMinute), bottom + 4.dp.toPx()), 1.dp.toPx())
+        for (mapMinute in 0..frames.minutes) {
+            val time = frames.time(mapMinute).atZone(zone)
+            if (time.minute % 30 != 0) continue
+            val caption = TIME_FORMAT.format(time); val textWidth = measurer.measure(caption, labelStyle).size.width
+            drawText(measurer, caption, Offset((x(mapMinute) - textWidth / 2f).coerceIn(0f, size.width - textWidth), bottom + 6.dp.toPx()), labelStyle)
         }
 
-        if (nowMin in 0..f.minutes) {
-            val nx = x(nowMin)
-            drawLine(cs.tertiary, Offset(nx, top), Offset(nx, bottom), 1.5.dp.toPx(),
+        if (nowMin in 0..frames.minutes) {
+            val nowX = x(nowMin)
+            drawLine(colors.tertiary, Offset(nowX, top), Offset(nowX, bottom), 1.5.dp.toPx(),
                 pathEffect = PathEffect.dashPathEffect(floatArrayOf(4.dp.toPx(), 3.dp.toPx())))
-            val w = measurer.measure("now", label).size.width
-            drawText(measurer, "now", Offset((nx - w / 2f).coerceIn(0f, size.width - w), 0f), label.copy(color = cs.tertiary))
+            val textWidth = measurer.measure("now", labelStyle).size.width
+            drawText(measurer, "now", Offset((nowX - textWidth / 2f).coerceIn(0f, size.width - textWidth), 0f), labelStyle.copy(color = colors.tertiary))
         }
 
-        val cx = x(minute)
-        drawLine(cs.onSurface, Offset(cx, top - 2.dp.toPx()), Offset(cx, bottom), 2.dp.toPx())
-        drawCircle(cs.surface, 9.dp.toPx(), Offset(cx, bottom)); drawCircle(cs.onSurface, 7.dp.toPx(), Offset(cx, bottom))
+        val selectedX = x(minute)
+        drawLine(colors.onSurface, Offset(selectedX, top - 2.dp.toPx()), Offset(selectedX, bottom), 2.dp.toPx())
+        drawCircle(colors.surface, 9.dp.toPx(), Offset(selectedX, bottom)); drawCircle(colors.onSurface, 7.dp.toPx(), Offset(selectedX, bottom))
     }
 }

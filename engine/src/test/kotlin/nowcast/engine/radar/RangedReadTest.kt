@@ -42,10 +42,10 @@ class RangedReadTest {
 
     private fun assertSame(want: Frame, got: Frame) {
         assertEquals(want.time, got.time)
-        assertEquals(want.rain.h, got.rain.h); assertEquals(want.rain.w, got.rain.w)
-        for (i in want.rain.v.indices)      // bit-identical, NaN included
-            assertEquals("pixel $i", want.rain.v[i].toRawBits(), got.rain.v[i].toRawBits())
-        assertEquals(want.geo.x1, got.geo.x1, 0.0); assertEquals(want.geo.y2, got.geo.y2, 0.0)
+        assertEquals(want.rain.rows, got.rain.rows); assertEquals(want.rain.cols, got.rain.cols)
+        for (i in want.rain.values.indices)      // bit-identical, NaN included
+            assertEquals("pixel $i", want.rain.values[i].toRawBits(), got.rain.values[i].toRawBits())
+        assertEquals(want.geo.left, got.geo.left, 0.0); assertEquals(want.geo.top, got.geo.top, 0.0)
     }
 
     @Test fun rangedCropIsBitIdenticalAndSmall() {
@@ -61,7 +61,7 @@ class RangedReadTest {
         val box = pointBbox(50.85, 4.35, 128.0)
         val small = RadarSource(null, cache).frame(url, box)
         assertEquals(before, served)
-        assertTrue(small.rain.h in 128..200 && small.rain.w in 128..200)
+        assertTrue(small.rain.rows in 128..200 && small.rain.cols in 128..200)
     }
 
     @Test fun pointBoxFetchesNoMoreThanTheRegion() {

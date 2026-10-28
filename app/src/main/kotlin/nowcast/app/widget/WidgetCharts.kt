@@ -30,22 +30,22 @@ enum class Ink { MUTED, BASE, PRIMARY, ACCENT }
 
 class Layer(val ink: Ink, val bitmap: Bitmap)
 
-private class Masks(wDp: Float, hDp: Float, density: Float) {
+private class Masks(widthDp: Float, heightDp: Float, density: Float) {
     /** Full density up to 2.5×, then down until a mask is at most [MAX_PX]: RemoteViews carry every bitmap. */
-    val scale: Float = minOf(density, 2.5f).let { s -> minOf(s, sqrt(MAX_PX / (wDp * hDp).coerceAtLeast(1f))) }
-    val w = max(1, (wDp * scale).toInt()); val h = max(1, (hDp * scale).toInt())
+    val scale: Float = minOf(density, 2.5f).let { cap -> minOf(cap, sqrt(MAX_PX / (widthDp * heightDp).coerceAtLeast(1f))) }
+    val width = max(1, (widthDp * scale).toInt()); val height = max(1, (heightDp * scale).toInt())
     private val maps = linkedMapOf<Ink, Canvas>()
     private val bitmaps = linkedMapOf<Ink, Bitmap>()
     operator fun get(ink: Ink): Canvas = maps.getOrPut(ink) {
-        Bitmap.createBitmap(w, h, Bitmap.Config.ALPHA_8).also { bitmaps[ink] = it }.let(::Canvas)
+        Bitmap.createBitmap(width, height, Bitmap.Config.ALPHA_8).also { bitmaps[ink] = it }.let(::Canvas)
     }
-    fun dp(v: Float) = v * scale
+    fun dp(value: Float) = value * scale
     fun paint(alpha: Float = 1f, stroke: Float = 0f) = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         this.alpha = (alpha * 255).toInt().coerceIn(0, 255)
         if (stroke > 0) { style = Paint.Style.STROKE; strokeWidth = dp(stroke); strokeCap = Paint.Cap.ROUND; strokeJoin = Paint.Join.ROUND }
     }
     fun text(sizeDp: Float = 10f, alpha: Float = 1f) = paint(alpha).apply { textSize = dp(sizeDp) }
-    fun layers() = Ink.entries.mapNotNull { i -> bitmaps[i]?.let { Layer(i, it) } }
+    fun layers() = Ink.entries.mapNotNull { ink -> bitmaps[ink]?.let { Layer(ink, it) } }
 
     companion object { const val MAX_PX = 150_000f }
 }
@@ -56,140 +56,140 @@ object WidgetCharts {
     /** Axis and day labels: 11.5 dp at full ink, up from 10 dp at 90 %, so they read at arm's length. */
     const val LABEL_DP = 11.5f
 
-    fun niceCeil(v: Double): Double =
-        doubleArrayOf(1.0, 2.0, 4.0, 5.0, 10.0, 20.0, 40.0, 50.0, 100.0, 200.0).firstOrNull { it >= v } ?: ceil(v)
+    fun niceCeil(value: Double): Double =
+        doubleArrayOf(1.0, 2.0, 4.0, 5.0, 10.0, 20.0, 40.0, 50.0, 100.0, 200.0).firstOrNull { it >= value } ?: ceil(value)
 
     /** −30…+60 min around now: P10–P90 band, expected line (past quieter), now marker; axes when there is room. */
-    fun minutes(s: Snapshot, now: Instant, wDp: Float, hDp: Float, density: Float, units: RainUnits, axes: Boolean,
+    fun minutes(snapshot: Snapshot, now: Instant, widthDp: Float, heightDp: Float, density: Float, units: RainUnits, axes: Boolean,
                 textScale: Float = 1f): List<Layer> {
-        val m = Masks(wDp, hDp, density)
-        val ls = LABEL_DP * textScale
-        val age = s.age(now)
-        val vis = s.minutes.indices.filter { s.minutes[it] - age in -30..60 }
-        val top = vis.maxOfOrNull { maxOf(s.p90[it], s.mean[it]).toDouble() } ?: 0.0
+        val masks = Masks(widthDp, heightDp, density)
+        val labelSize = LABEL_DP * textScale
+        val age = snapshot.age(now)
+        val visible = snapshot.minutes.indices.filter { snapshot.minutes[it] - age in -30..60 }
+        val top = visible.maxOfOrNull { maxOf(snapshot.p90[it], snapshot.mean[it]).toDouble() } ?: 0.0
         val yMax = niceCeil(maxOf(1.0, top * 1.15))
-        val left = if (axes) m.dp((if (units == RainUnits.WORDS) 46f else 26f) * ls / 10f) else m.dp(2f)
-        val right = m.w - m.dp(4f)
-        val y0 = if (axes) m.dp(ls + 3f) else m.dp(3f)
-        val bottom = m.h - if (axes) m.dp(ls + 5f) else m.dp(2f)
+        val left = if (axes) masks.dp((if (units == RainUnits.WORDS) 46f else 26f) * labelSize / 10f) else masks.dp(2f)
+        val right = masks.width - masks.dp(4f)
+        val plotTop = if (axes) masks.dp(labelSize + 3f) else masks.dp(3f)
+        val bottom = masks.height - if (axes) masks.dp(labelSize + 5f) else masks.dp(2f)
         fun x(min: Int) = left + (min + 30) / 90f * (right - left)
-        fun y(v: Double) = bottom - (v / yMax).toFloat().coerceIn(0f, 1.04f) * (bottom - y0)
+        fun y(value: Double) = bottom - (value / yMax).toFloat().coerceIn(0f, 1.04f) * (bottom - plotTop)
 
-        val muted = m[Ink.MUTED]
-        val grid = m.paint(0.35f, 1f).apply { pathEffect = DashPathEffect(floatArrayOf(m.dp(3f), m.dp(4f)), 0f) }
-        muted.drawLine(left, bottom, right, bottom, m.paint(0.5f, 1f))
-        val label = m.text(ls)
+        val muted = masks[Ink.MUTED]
+        val grid = masks.paint(0.35f, 1f).apply { pathEffect = DashPathEffect(floatArrayOf(masks.dp(3f), masks.dp(4f)), 0f) }
+        muted.drawLine(left, bottom, right, bottom, masks.paint(0.5f, 1f))
+        val label = masks.text(labelSize)
         if (axes) {
             val ticks = if (units == RainUnits.WORDS) listOf(2.5 to "moderate", 10.0 to "heavy").filter { it.first <= yMax }
                 .ifEmpty { listOf(yMax to "light") }
-            else listOf(yMax / 2 to fmt(yMax / 2), yMax to "${fmt(yMax)} mm/h")
+            else listOf(yMax / 2 to formatRate(yMax / 2), yMax to "${formatRate(yMax)} mm/h")
             // big text on a short chart: the labels would sit on each other, keep only the top one
-            for ((v, t) in if (bottom - y0 < m.dp(ls * 3)) ticks.takeLast(1) else ticks) {
-                muted.drawLine(left, y(v), right, y(v), grid)
-                muted.drawText(t, m.dp(1f), y(v) - m.dp(2.5f), label)     // above its line, never across it
+            for ((value, text) in if (bottom - plotTop < masks.dp(labelSize * 3)) ticks.takeLast(1) else ticks) {
+                muted.drawLine(left, y(value), right, y(value), grid)
+                muted.drawText(text, masks.dp(1f), y(value) - masks.dp(2.5f), label)     // above its line, never across it
             }
             for (min in listOf(-30, 0, 30, 60)) {
-                val t = if (min == 0) "now" else if (min > 0) "+$min" else "$min"
-                val tw = label.measureText(t)
-                muted.drawText(t, (x(min) - tw / 2).coerceIn(left, right - tw), m.h - m.dp(3f), label)
+                val text = if (min == 0) "now" else if (min > 0) "+$min" else "$min"
+                val textWidth = label.measureText(text)
+                muted.drawText(text, (x(min) - textWidth / 2).coerceIn(left, right - textWidth), masks.height - masks.dp(3f), label)
             }
         }
-        if (vis.size >= 2) {
-            val pr = m[Ink.PRIMARY]
+        if (visible.size >= 2) {
+            val primary = masks[Ink.PRIMARY]
             val band = Path().apply {
-                vis.forEachIndexed { k, i -> val px = x(s.minutes[i] - age); val py = y(s.p90[i].toDouble()); if (k == 0) moveTo(px, py) else lineTo(px, py) }
-                vis.asReversed().forEach { i -> lineTo(x(s.minutes[i] - age), y(s.p10[i].toDouble())) }
+                visible.forEachIndexed { k, i -> val pointX = x(snapshot.minutes[i] - age); val pointY = y(snapshot.p90[i].toDouble()); if (k == 0) moveTo(pointX, pointY) else lineTo(pointX, pointY) }
+                visible.asReversed().forEach { i -> lineTo(x(snapshot.minutes[i] - age), y(snapshot.p10[i].toDouble())) }
                 close()
             }
-            pr.drawPath(band, m.paint(0.22f))
-            fun line(idx: List<Int>) = Path().apply {
-                idx.forEachIndexed { k, i -> val px = x(s.minutes[i] - age); val py = y(s.mean[i].toDouble()); if (k == 0) moveTo(px, py) else lineTo(px, py) }
+            primary.drawPath(band, masks.paint(0.22f))
+            fun line(points: List<Int>) = Path().apply {
+                points.forEachIndexed { k, i -> val pointX = x(snapshot.minutes[i] - age); val pointY = y(snapshot.mean[i].toDouble()); if (k == 0) moveTo(pointX, pointY) else lineTo(pointX, pointY) }
             }
-            val past = vis.filter { s.minutes[it] - age <= 0 }; val fut = vis.filter { s.minutes[it] - age >= 0 }
-            if (past.size >= 2) muted.drawPath(line(past), m.paint(0.9f, 1.6f))
-            if (fut.size >= 2) pr.drawPath(line(fut), m.paint(1f, 2.6f))
+            val past = visible.filter { snapshot.minutes[it] - age <= 0 }; val future = visible.filter { snapshot.minutes[it] - age >= 0 }
+            if (past.size >= 2) muted.drawPath(line(past), masks.paint(0.9f, 1.6f))
+            if (future.size >= 2) primary.drawPath(line(future), masks.paint(1f, 2.6f))
         }
-        val acc = m[Ink.ACCENT]
-        acc.drawLine(x(0), y0, x(0), bottom, m.paint(1f, 1.4f))
-        acc.drawCircle(x(0), y0, m.dp(2.6f), m.paint())
-        return m.layers()
+        val accent = masks[Ink.ACCENT]
+        accent.drawLine(x(0), plotTop, x(0), bottom, masks.paint(1f, 1.4f))
+        accent.drawCircle(x(0), plotTop, masks.dp(2.6f), masks.paint())
+        return masks.layers()
     }
 
     /** Half-hour bars from now: height = expected mm (square root, so drizzle shows), colour = chance. */
-    fun hours(s: Snapshot, now: Instant, hours: Int, wDp: Float, hDp: Float, density: Float, textScale: Float = 1f,
+    fun hours(snapshot: Snapshot, now: Instant, hours: Int, widthDp: Float, heightDp: Float, density: Float, textScale: Float = 1f,
               zone: ZoneId = ZoneId.systemDefault()): List<Layer> {
-        val m = Masks(wDp, hDp, density)
-        val ls = LABEL_DP * textScale
-        val n = hours * 2
-        val t0 = OutlookBars.floor30(now).epochSecond
-        val by = s.bars.associateBy { it.start }
-        val slots = List(n) { by[t0 + 1800L * it] }
+        val masks = Masks(widthDp, heightDp, density)
+        val labelSize = LABEL_DP * textScale
+        val count = hours * 2
+        val start = OutlookBars.floor30(now).epochSecond
+        val byStart = snapshot.bars.associateBy { it.start }
+        val slots = List(count) { byStart[start + 1800L * it] }
         val yMax = maxOf(1.0, slots.filterNotNull().maxOfOrNull { it.mm.toDouble() } ?: 0.0)
-        val days = hDp >= 50f          // a 2×1 has no room for a row of day names
-        val y0 = if (days) m.dp(ls + 3f) else m.dp(3f); val bottom = m.h - m.dp(ls + 4f)
-        val slot = m.w.toFloat() / n
-        val bw = (slot * 0.72f).coerceAtLeast(1f)
-        val muted = m[Ink.MUTED]; val base = m[Ink.BASE]; val pr = m[Ink.PRIMARY]
-        val label = m.text(ls)
-        muted.drawLine(0f, bottom, m.w.toFloat(), bottom, m.paint(0.5f, 1f))
+        val days = heightDp >= 50f          // a 2×1 has no room for a row of day names
+        val plotTop = if (days) masks.dp(labelSize + 3f) else masks.dp(3f); val bottom = masks.height - masks.dp(labelSize + 4f)
+        val slot = masks.width.toFloat() / count
+        val barWidth = (slot * 0.72f).coerceAtLeast(1f)
+        val muted = masks[Ink.MUTED]; val base = masks[Ink.BASE]; val primary = masks[Ink.PRIMARY]
+        val label = masks.text(labelSize)
+        muted.drawLine(0f, bottom, masks.width.toFloat(), bottom, masks.paint(0.5f, 1f))
         val every = if (hours <= 12) 3 else 6
-        val solid = m.paint(); val dot = m.paint(0.6f)
-        slots.forEachIndexed { i, b ->
-            val t = java.time.Instant.ofEpochSecond(t0 + 1800L * i).atZone(zone)
-            val cx = i * slot + slot / 2
-            if (days && ((i == 0 && t.hour < 20) || (t.hour == 0 && t.minute == 0))) {
-                if (i > 0) muted.drawLine(i * slot, m.dp(2f), i * slot, bottom, m.paint(0.5f, 1f))
-                muted.drawText(DAY.format(t), i * slot + if (i > 0) m.dp(3f) else 0f, m.dp(ls), label)
+        val solid = masks.paint(); val dot = masks.paint(0.6f)
+        slots.forEachIndexed { i, bar ->
+            val time = java.time.Instant.ofEpochSecond(start + 1800L * i).atZone(zone)
+            val centerX = i * slot + slot / 2
+            if (days && ((i == 0 && time.hour < 20) || (time.hour == 0 && time.minute == 0))) {
+                if (i > 0) muted.drawLine(i * slot, masks.dp(2f), i * slot, bottom, masks.paint(0.5f, 1f))
+                muted.drawText(DAY.format(time), i * slot + if (i > 0) masks.dp(3f) else 0f, masks.dp(labelSize), label)
             }
-            if (t.minute == 0 && t.hour % every == 0) {
-                val txt = "%02d".format(t.hour); val tw = label.measureText(txt)
-                muted.drawText(txt, (i * slot - tw / 2).coerceIn(0f, m.w - tw), m.h - m.dp(2f), label)
+            if (time.minute == 0 && time.hour % every == 0) {
+                val hourText = "%02d".format(time.hour); val textWidth = label.measureText(hourText)
+                muted.drawText(hourText, (i * slot - textWidth / 2).coerceIn(0f, masks.width - textWidth), masks.height - masks.dp(2f), label)
             }
-            if (b == null) { muted.drawCircle(cx, bottom - m.dp(2f), m.dp(0.9f), dot); return@forEachIndexed }
-            val h = if (b.mm < 0.02f) m.dp(1f) else (sqrt((b.mm / yMax).coerceIn(0.0, 1.0)) * (bottom - y0)).toFloat().coerceAtLeast(m.dp(2f))
-            val r = RectF(cx - bw / 2, bottom - h, cx + bw / 2, bottom)
-            base.drawRoundRect(r, bw / 3, bw / 3, solid)
-            pr.drawRoundRect(r, bw / 3, bw / 3, m.paint((0.15f + 0.85f * b.prob).coerceIn(0f, 1f)))
-            if (b.nowcast) m[Ink.ACCENT].drawRect(i * slot + 0.5f, bottom + m.dp(1f), (i + 1) * slot - 0.5f, bottom + m.dp(3f), solid)
+            if (bar == null) { muted.drawCircle(centerX, bottom - masks.dp(2f), masks.dp(0.9f), dot); return@forEachIndexed }
+            val barHeight = if (bar.mm < 0.02f) masks.dp(1f) else (sqrt((bar.mm / yMax).coerceIn(0.0, 1.0)) * (bottom - plotTop)).toFloat().coerceAtLeast(masks.dp(2f))
+            val rect = RectF(centerX - barWidth / 2, bottom - barHeight, centerX + barWidth / 2, bottom)
+            base.drawRoundRect(rect, barWidth / 3, barWidth / 3, solid)
+            primary.drawRoundRect(rect, barWidth / 3, barWidth / 3, masks.paint((0.15f + 0.85f * bar.probability).coerceIn(0f, 1f)))
+            if (bar.nowcast) masks[Ink.ACCENT].drawRect(i * slot + 0.5f, bottom + masks.dp(1f), (i + 1) * slot - 0.5f, bottom + masks.dp(3f), solid)
         }
-        return m.layers()
+        return masks.layers()
     }
 
     /** The radar crop in its own colours (opaque-free ARGB at its native 128 px). */
-    fun rain(f: SFrame, r: SRadar, lut: IntArray): Bitmap =
-        Bitmap.createBitmap(Render.argb(f.bytes(), lut), r.w, r.h, Bitmap.Config.ARGB_8888)
+    fun rain(frame: SFrame, radar: SRadar, lut: IntArray): Bitmap =
+        Bitmap.createBitmap(Render.argb(frame.bytes(), lut), radar.width, radar.height, Bitmap.Config.ARGB_8888)
 
     /** Coast, borders, a 25 km ring and home, as masks the same shape as [rain]. */
-    fun radarMarks(ctx: Context, r: SRadar, sizeDp: Float, density: Float): List<Layer> {
-        val m = Masks(sizeDp, sizeDp * r.h / r.w, density)
-        val (lon0, lat0, lon1, lat1) = r.bbox
-        fun my(lat: Double) = ln(tan(PI / 4 + Math.toRadians(lat) / 2))
-        val my0 = my(lat0); val my1 = my(lat1)
-        fun px(lon: Double) = ((lon - lon0) / (lon1 - lon0) * m.w).toFloat()
-        fun py(lat: Double) = ((my1 - my(lat)) / (my1 - my0) * m.h).toFloat()
-        val ink = m[Ink.MUTED]; val pen = m.paint(0.75f, 1.1f)
-        val pad = 0.5
+    fun radarMarks(ctx: Context, radar: SRadar, sizeDp: Float, density: Float): List<Layer> {
+        val masks = Masks(sizeDp, sizeDp * radar.height / radar.width, density)
+        val (west, south, east, north) = radar.bbox
+        fun mercatorY(lat: Double) = ln(tan(PI / 4 + Math.toRadians(lat) / 2))
+        val mercatorSouth = mercatorY(south); val mercatorNorth = mercatorY(north)
+        fun toX(lon: Double) = ((lon - west) / (east - west) * masks.width).toFloat()
+        fun toY(lat: Double) = ((mercatorNorth - mercatorY(lat)) / (mercatorNorth - mercatorSouth) * masks.height).toFloat()
+        val ink = masks[Ink.MUTED]; val pen = masks.paint(0.75f, 1.1f)
+        val margin = 0.5
         for (line in Outline.lines(ctx)) {
             val path = Path(); var open = false
             for (k in line.indices step 2) {
                 val lon = line[k].toDouble(); val lat = line[k + 1].toDouble()
-                val inside = lon in lon0 - pad..lon1 + pad && lat in lat0 - pad..lat1 + pad
+                val inside = lon in west - margin..east + margin && lat in south - margin..north + margin
                 if (!inside) { open = false; continue }
-                if (!open) path.moveTo(px(lon), py(lat)) else path.lineTo(px(lon), py(lat))
+                if (!open) path.moveTo(toX(lon), toY(lat)) else path.lineTo(toX(lon), toY(lat))
                 open = true
             }
             ink.drawPath(path, pen)
         }
-        val cx = px(r.homeLon); val cy = py(r.homeLat)
-        val ring = 25.0 / Snapshot.HALF_KM * m.w / 2
-        ink.drawCircle(cx, cy, ring.toFloat(), m.paint(0.5f, 1f).apply { pathEffect = DashPathEffect(floatArrayOf(m.dp(3f), m.dp(3f)), 0f) })
-        val acc = m[Ink.ACCENT]
-        acc.drawCircle(cx, cy, m.dp(5.5f), m.paint(0.35f))
-        acc.drawCircle(cx, cy, m.dp(3f), m.paint())
-        return m.layers()
+        val homeX = toX(radar.homeLon); val homeY = toY(radar.homeLat)
+        val ring = 25.0 / Snapshot.HALF_KM * masks.width / 2
+        ink.drawCircle(homeX, homeY, ring.toFloat(), masks.paint(0.5f, 1f).apply { pathEffect = DashPathEffect(floatArrayOf(masks.dp(3f), masks.dp(3f)), 0f) })
+        val accent = masks[Ink.ACCENT]
+        accent.drawCircle(homeX, homeY, masks.dp(5.5f), masks.paint(0.35f))
+        accent.drawCircle(homeX, homeY, masks.dp(3f), masks.paint())
+        return masks.layers()
     }
 
-    fun fmt(v: Double): String = if (v >= 10 || v == Math.rint(v)) "%.0f".format(Locale.ROOT, v) else "%.1f".format(Locale.ROOT, v)
+    fun formatRate(rate: Double): String = if (rate >= 10 || rate == Math.rint(rate)) "%.0f".format(Locale.ROOT, rate) else "%.1f".format(Locale.ROOT, rate)
 }
 
 /** Natural Earth 1:50m coastlines and land borders over Europe (public domain), lon,lat pairs per line. */
@@ -197,9 +197,9 @@ object Outline {
     @Volatile private var cache: List<FloatArray>? = null
 
     fun lines(ctx: Context): List<FloatArray> = cache ?: runCatching {
-        ctx.assets.open("outline.txt").bufferedReader().readLines().filter { it.isNotBlank() }.map { l ->
-            val pts = l.split(' ')
-            FloatArray(pts.size * 2).also { a -> pts.forEachIndexed { i, p -> val c = p.indexOf(','); a[2 * i] = p.substring(0, c).toFloat(); a[2 * i + 1] = p.substring(c + 1).toFloat() } }
+        ctx.assets.open("outline.txt").bufferedReader().readLines().filter { it.isNotBlank() }.map { line ->
+            val points = line.split(' ')
+            FloatArray(points.size * 2).also { coords -> points.forEachIndexed { i, point -> val comma = point.indexOf(','); coords[2 * i] = point.substring(0, comma).toFloat(); coords[2 * i + 1] = point.substring(comma + 1).toFloat() } }
         }
     }.getOrDefault(emptyList()).also { cache = it }
 }

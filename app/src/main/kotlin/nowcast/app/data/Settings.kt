@@ -53,32 +53,32 @@ data class Settings(
         val DEFAULT_RADAR = Render.PALETTES.getValue(Render.DEFAULT_PALETTE).map { it.second }
 
         fun hex(rgb: Int) = "%06X".format(rgb and 0xFFFFFF)
-        fun parseHex(s: String): Int? = s.trim().removePrefix("#").takeIf { it.length == 6 }?.toIntOrNull(16)
+        fun parseHex(text: String): Int? = text.trim().removePrefix("#").takeIf { it.length == 6 }?.toIntOrNull(16)
 
-        fun fromMap(m: Map<String, *>): Settings {
-            val d = Settings()
-            fun s(k: String) = m[k]?.toString()
-            fun b(k: String, def: Boolean) = s(k)?.toBooleanStrictOrNull() ?: def
-            val lat = s("homeLat")?.toDoubleOrNull()?.takeIf { it in -90.0..90.0 }
-            val lon = s("homeLon")?.toDoubleOrNull()?.takeIf { it in -180.0..180.0 }
+        fun fromMap(stored: Map<String, *>): Settings {
+            val defaults = Settings()
+            fun text(key: String) = stored[key]?.toString()
+            fun flag(key: String, fallback: Boolean) = text(key)?.toBooleanStrictOrNull() ?: fallback
+            val lat = text("homeLat")?.toDoubleOrNull()?.takeIf { it in -90.0..90.0 }
+            val lon = text("homeLon")?.toDoubleOrNull()?.takeIf { it in -180.0..180.0 }
             return Settings(
                 homeLat = if (lon != null) lat else null, homeLon = if (lat != null) lon else null,
-                followLocation = b("followLocation", d.followLocation),
-                regionId = s("regionId")?.takeIf { it.isNotBlank() },
-                view = NowView.entries.firstOrNull { it.name == s("view") } ?: d.view,
-                palette = s("palette")?.takeIf { it == Render.CUSTOM || it in Render.PALETTES } ?: d.palette,
-                radarColors = s("radarColors")?.split(",")?.map { parseHex(it) }
-                    ?.takeIf { l -> l.size == DEFAULT_RADAR.size && l.all { it != null } }?.map { it!! } ?: d.radarColors,
-                appColors = AppColors.entries.firstOrNull { it.name == s("appColors") } ?: d.appColors,
-                accent = s("accent")?.let(::parseHex) ?: d.accent,
-                darkMode = DarkMode.entries.firstOrNull { it.name == s("darkMode") } ?: d.darkMode,
-                notify = b("notify", d.notify),
-                notifyLeadMin = (s("notifyLeadMin")?.toIntOrNull() ?: d.notifyLeadMin)
+                followLocation = flag("followLocation", defaults.followLocation),
+                regionId = text("regionId")?.takeIf { it.isNotBlank() },
+                view = NowView.entries.firstOrNull { it.name == text("view") } ?: defaults.view,
+                palette = text("palette")?.takeIf { it == Render.CUSTOM || it in Render.PALETTES } ?: defaults.palette,
+                radarColors = text("radarColors")?.split(",")?.map { parseHex(it) }
+                    ?.takeIf { colors -> colors.size == DEFAULT_RADAR.size && colors.all { it != null } }?.map { it!! } ?: defaults.radarColors,
+                appColors = AppColors.entries.firstOrNull { it.name == text("appColors") } ?: defaults.appColors,
+                accent = text("accent")?.let(::parseHex) ?: defaults.accent,
+                darkMode = DarkMode.entries.firstOrNull { it.name == text("darkMode") } ?: defaults.darkMode,
+                notify = flag("notify", defaults.notify),
+                notifyLeadMin = (text("notifyLeadMin")?.toIntOrNull() ?: defaults.notifyLeadMin)
                     .coerceIn(LEAD_RANGE.first, LEAD_RANGE.last),
-                notifyThreshold = (s("notifyThreshold")?.toDoubleOrNull()?.takeIf { it.isFinite() } ?: d.notifyThreshold)
+                notifyThreshold = (text("notifyThreshold")?.toDoubleOrNull()?.takeIf { it.isFinite() } ?: defaults.notifyThreshold)
                     .coerceIn(THRESHOLD_RANGE.start, THRESHOLD_RANGE.endInclusive),
-                background = b("background", d.background), useModel = b("useModel", d.useModel),
-                nowcastSource = NowcastSource.entries.firstOrNull { it.name == s("nowcastSource") } ?: d.nowcastSource,
+                background = flag("background", defaults.background), useModel = flag("useModel", defaults.useModel),
+                nowcastSource = NowcastSource.entries.firstOrNull { it.name == text("nowcastSource") } ?: defaults.nowcastSource,
             )
         }
     }

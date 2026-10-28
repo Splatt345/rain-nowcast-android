@@ -15,9 +15,9 @@ class RadarTest {
 
     @Test fun cropMatchesReference() {
         val f = Odim.readCrop(sample, be)
-        assertEquals(EXPECTED_H, f.rain.h); assertEquals(EXPECTED_W, f.rain.w)
-        assertEquals(EXPECTED_NAN, f.rain.v.count { it.isNaN() })
-        assertEquals(EXPECTED_MAX, f.rain.v.filter { !it.isNaN() }.max(), 1e-3)
+        assertEquals(EXPECTED_H, f.rain.rows); assertEquals(EXPECTED_W, f.rain.cols)
+        assertEquals(EXPECTED_NAN, f.rain.values.count { it.isNaN() })
+        assertEquals(EXPECTED_MAX, f.rain.values.filter { !it.isNaN() }.max(), 1e-3)
         assertEquals(EXPECTED_150_180, f.rain[150, 180], 1e-3)
         assertEquals(java.time.Instant.parse("2026-09-14T03:20:00Z"), f.time)
     }
@@ -39,7 +39,7 @@ class RadarTest {
     @Test fun pointLandsInTheCrop() {
         val f = Odim.readCrop(sample, be)
         val (r, c) = f.geo.rowCol(50.85, 4.35)
-        assertTrue(r in 0 until f.rain.h && c in 0 until f.rain.w)
+        assertTrue(r in 0 until f.rain.rows && c in 0 until f.rain.cols)
     }
 
     @Test fun pruneKeepsJustTheInputWindow() {

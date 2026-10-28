@@ -34,7 +34,7 @@ import kotlin.random.Random
 @Composable
 fun FirstRun(onKey: (String) -> Unit, onOpenMeteo: () -> Unit) {
     var key by rememberSaveable { mutableStateOf("") }
-    var show by rememberSaveable { mutableStateOf(false) }
+    var keyVisible by rememberSaveable { mutableStateOf(false) }
     val uri = LocalUriHandler.current
     Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surface) {
         Column(
@@ -51,13 +51,13 @@ fun FirstRun(onKey: (String) -> Unit, onOpenMeteo: () -> Unit) {
             OutlinedTextField(
                 key, { key = it.trim() }, Modifier.fillMaxWidth(),
                 label = { Text("ORD API key") }, singleLine = true,
-                visualTransformation = if (show) VisualTransformation.None else PasswordVisualTransformation(),
+                visualTransformation = if (keyVisible) VisualTransformation.None else PasswordVisualTransformation(),
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Done),
                 keyboardActions = KeyboardActions(onDone = { if (key.isNotBlank()) onKey(key) }),
                 trailingIcon = {
-                    IconButton({ show = !show }) {
-                        Icon(if (show) Icons.Outlined.VisibilityOff else Icons.Outlined.Visibility,
-                            if (show) "Hide key" else "Show key")
+                    IconButton({ keyVisible = !keyVisible }) {
+                        Icon(if (keyVisible) Icons.Outlined.VisibilityOff else Icons.Outlined.Visibility,
+                            if (keyVisible) "Hide key" else "Show key")
                     }
                 },
                 supportingText = { Text("Stored encrypted on this device and sent only to MeteoGate.") },
@@ -74,23 +74,23 @@ fun FirstRun(onKey: (String) -> Unit, onOpenMeteo: () -> Unit) {
 
 @Composable
 private fun RainArt(modifier: Modifier) {
-    val cs = MaterialTheme.colorScheme
-    val drops = remember { val r = Random(7); List(46) { Triple(r.nextFloat(), r.nextFloat(), 0.4f + r.nextFloat() * 0.6f) } }
+    val colors = MaterialTheme.colorScheme
+    val drops = remember { val random = Random(7); List(46) { Triple(random.nextFloat(), random.nextFloat(), 0.4f + random.nextFloat() * 0.6f) } }
     Canvas(modifier.semantics { contentDescription = "" }) {
-        drawRect(Brush.verticalGradient(listOf(cs.primaryContainer, cs.surfaceContainerHigh)))
-        val c = Offset(size.width * 0.52f, size.height * 0.36f)
-        val r = size.minDimension * 0.17f
+        drawRect(Brush.verticalGradient(listOf(colors.primaryContainer, colors.surfaceContainerHigh)))
+        val center = Offset(size.width * 0.52f, size.height * 0.36f)
+        val radius = size.minDimension * 0.17f
         listOf(Offset(-1.3f, 0.25f) to 0.75f, Offset(-0.3f, -0.1f) to 1f, Offset(0.8f, 0.12f) to 0.85f, Offset(1.6f, 0.38f) to 0.6f)
-            .forEach { (o, s) -> drawCircle(cs.primary, r * s, Offset(c.x + o.x * r, c.y + o.y * r)) }
-        drawRect(cs.primary, Offset(c.x - 1.3f * r, c.y + 0.2f * r), androidx.compose.ui.geometry.Size(2.9f * r, 0.75f * r))
-        for ((x, y, a) in drops) {
-            val px = size.width * x; val py = size.height * (0.55f + y * 0.45f)
-            drawLine(cs.primary.copy(alpha = 0.35f * a), Offset(px, py), Offset(px - 6f, py + 22f * a), 3f, StrokeCap.Round)
+            .forEach { (offset, scale) -> drawCircle(colors.primary, radius * scale, Offset(center.x + offset.x * radius, center.y + offset.y * radius)) }
+        drawRect(colors.primary, Offset(center.x - 1.3f * radius, center.y + 0.2f * radius), androidx.compose.ui.geometry.Size(2.9f * radius, 0.75f * radius))
+        for ((x, y, strength) in drops) {
+            val dropX = size.width * x; val dropY = size.height * (0.55f + y * 0.45f)
+            drawLine(colors.primary.copy(alpha = 0.35f * strength), Offset(dropX, dropY), Offset(dropX - 6f, dropY + 22f * strength), 3f, StrokeCap.Round)
         }
-        val sy = size.height - 22f
+        val stripY = size.height - 22f
         for (i in 0 until 24) {
-            val p = (kotlin.math.sin(i / 3.5f) * 0.5f + 0.5f)
-            drawRoundRect(cs.primary.copy(alpha = 0.15f + 0.75f * p), Offset(24f + i * (size.width - 48f) / 24, sy),
+            val level = (kotlin.math.sin(i / 3.5f) * 0.5f + 0.5f)
+            drawRoundRect(colors.primary.copy(alpha = 0.15f + 0.75f * level), Offset(24f + i * (size.width - 48f) / 24, stripY),
                 androidx.compose.ui.geometry.Size((size.width - 48f) / 24 - 4f, 10f), androidx.compose.ui.geometry.CornerRadius(4f))
         }
     }

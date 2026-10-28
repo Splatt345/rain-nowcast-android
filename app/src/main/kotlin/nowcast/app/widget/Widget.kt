@@ -60,9 +60,9 @@ abstract class RainWidgetBase(val defaultType: WidgetType) : GlanceAppWidget() {
     override suspend fun provideGlance(context: Context, id: GlanceId) {
         provideContent {
             val prefs = currentState<Preferences>()
-            val opts = Widgets.options(prefs, defaultType)
-            val snap = remember(prefs[Widgets.REV]) { Snapshot.read(context.filesDir) }
-            WidgetContent(context, opts, snap, Instant.now(), actualSizes(LocalAppWidgetOptions.current))
+            val options = Widgets.options(prefs, defaultType)
+            val snapshot = remember(prefs[Widgets.REV]) { Snapshot.read(context.filesDir) }
+            WidgetContent(context, options, snapshot, Instant.now(), actualSizes(LocalAppWidgetOptions.current))
         }
     }
 }
@@ -92,17 +92,17 @@ object Widgets {
 
     /** The widget class an appWidgetId was placed from. */
     fun forAppWidget(ctx: Context, appWidgetId: Int): RainWidgetBase {
-        val cls = AppWidgetManager.getInstance(ctx).getAppWidgetInfo(appWidgetId)?.provider?.className
-        return ALL.firstOrNull { it.first.name == cls }?.second ?: ALL.first().second
+        val className = AppWidgetManager.getInstance(ctx).getAppWidgetInfo(appWidgetId)?.provider?.className
+        return ALL.firstOrNull { it.first.name == className }?.second ?: ALL.first().second
     }
 
     /** Re-render every widget: after each refresh (full or box run, new data or not) and on option changes. */
     suspend fun updateAll(ctx: Context) {
-        val m = GlanceAppWidgetManager(ctx)
+        val manager = GlanceAppWidgetManager(ctx)
         val rev = System.currentTimeMillis()
-        for ((_, w) in ALL) for (id in m.getGlanceIds(w.javaClass)) {
+        for ((_, widget) in ALL) for (id in manager.getGlanceIds(widget.javaClass)) {
             updateAppWidgetState(ctx, id) { it[REV] = rev }
-            w.update(ctx, id)
+            widget.update(ctx, id)
         }
     }
 }
@@ -112,18 +112,18 @@ class RefreshNow : ActionCallback {
 }
 
 /** Sizes the launcher really shows (portrait and landscape), so bitmaps match them rather than the bucket. */
-fun actualSizes(b: Bundle): List<DpSize> {
-    if (Build.VERSION.SDK_INT >= 31) BundleCompat.getParcelableArrayList(b, AppWidgetManager.OPTION_APPWIDGET_SIZES, SizeF::class.java)
-        ?.takeIf { it.isNotEmpty() }?.let { l -> return l.map { DpSize(it.width.dp, it.height.dp) } }
-    val minW = b.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH); val maxW = b.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_WIDTH)
-    val minH = b.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT); val maxH = b.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT)
-    if (minW == 0 || minH == 0) return emptyList()
-    return listOf(DpSize(minW.dp, maxH.dp), DpSize(maxW.dp, minH.dp))
+fun actualSizes(bundle: Bundle): List<DpSize> {
+    if (Build.VERSION.SDK_INT >= 31) BundleCompat.getParcelableArrayList(bundle, AppWidgetManager.OPTION_APPWIDGET_SIZES, SizeF::class.java)
+        ?.takeIf { it.isNotEmpty() }?.let { sizes -> return sizes.map { DpSize(it.width.dp, it.height.dp) } }
+    val minWidth = bundle.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH); val maxWidth = bundle.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_WIDTH)
+    val minHeight = bundle.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT); val maxHeight = bundle.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT)
+    if (minWidth == 0 || minHeight == 0) return emptyList()
+    return listOf(DpSize(minWidth.dp, maxHeight.dp), DpSize(maxWidth.dp, minHeight.dp))
 }
 
-private fun schemes(ctx: Context, t: WidgetTheme, s: Settings): Pair<ColorScheme, ColorScheme> {
-    val (light, dark) = appSchemes(ctx, s)
-    return when (t) {
+private fun schemes(ctx: Context, theme: WidgetTheme, settings: Settings): Pair<ColorScheme, ColorScheme> {
+    val (light, dark) = appSchemes(ctx, settings)
+    return when (theme) {
         WidgetTheme.LIGHT -> light to light
         WidgetTheme.DARK -> dark to dark
         WidgetTheme.DYNAMIC -> if (Build.VERSION.SDK_INT >= 31) dynamicLightColorScheme(ctx) to dynamicDarkColorScheme(ctx) else AppLight to AppDark
@@ -131,300 +131,300 @@ private fun schemes(ctx: Context, t: WidgetTheme, s: Settings): Pair<ColorScheme
     }
 }
 
-private fun tapAction(ctx: Context, t: TapAction): Action = when (t) {
+private fun tapAction(ctx: Context, action: TapAction): Action = when (action) {
     TapAction.OPEN_NOW -> actionStartActivity(MainActivity.intent(ctx, Tab.NOW))
     TapAction.OPEN_MAP -> actionStartActivity(MainActivity.intent(ctx, Tab.MAP))
     TapAction.REFRESH -> actionRunCallback<RefreshNow>()
 }
 
-private val HM = DateTimeFormatter.ofPattern("HH:mm")
+private val TIME_FORMAT = DateTimeFormatter.ofPattern("HH:mm")
 private val PAD = 12.dp
 
 /** Everything a layout needs, computed once per composition. */
-private class W(val ctx: Context, val o: WidgetOptions, val s: Snapshot, val now: Instant,
-                val light: ColorScheme, val dark: ColorScheme, wDp: Float, hDp: Float, settings: Settings) {
-    val age = s.age(now)
+private class WidgetView(val ctx: Context, val options: WidgetOptions, val snapshot: Snapshot, val now: Instant,
+                val light: ColorScheme, val dark: ColorScheme, widthDp: Float, heightDp: Float, settings: Settings) {
+    val age = snapshot.age(now)
     val density = ctx.resources.displayMetrics.density
-    val chance = if (o.showChance) s.chance(now) else null
-    val sentence = RainWords.widget(s.summary(now), o.units, chance != null)
+    val chance = if (options.showChance) snapshot.chance(now) else null
+    val sentence = RainWords.widget(snapshot.summary(now), options.units, chance != null)
     /** One line on a 2×1. */
-    val short = RainWords.short(s.summary(now))
+    val short = RainWords.short(snapshot.summary(now))
     /** Text scale: fonts and the room reserved for text grow together, the charts take what is left. */
-    val t = o.text.scale
-    fun sp(v: Int) = (v * t).sp
-    fun px(v: Int) = v * t
+    val textScale = options.text.scale
+    fun sp(value: Int) = (value * textScale).sp
+    fun px(value: Int) = value * textScale
     val lut by lazy { settings.radarLut() }
     /** Inner size, inside the padding. */
-    val iw = wDp - 2 * PAD.value; val ih = hDp - 2 * PAD.value
-    fun mix(p: Float): GlanceColor = ColorProvider(day = lerp(light.surfaceVariant, light.primary, p.coerceIn(0f, 1f)),
-        night = lerp(dark.surfaceVariant, dark.primary, p.coerceIn(0f, 1f)))
+    val innerWidth = widthDp - 2 * PAD.value; val innerHeight = heightDp - 2 * PAD.value
+    fun mix(chance: Float): GlanceColor = ColorProvider(day = lerp(light.surfaceVariant, light.primary, chance.coerceIn(0f, 1f)),
+        night = lerp(dark.surfaceVariant, dark.primary, chance.coerceIn(0f, 1f)))
 }
 
 @Composable
-private fun WidgetContent(ctx: Context, o: WidgetOptions, snap: Snapshot?, now: Instant, actual: List<DpSize>) {
+private fun WidgetContent(ctx: Context, options: WidgetOptions, snapshot: Snapshot?, now: Instant, actual: List<DpSize>) {
     val bucket = LocalSize.current
-    val b = WidgetLayout.bucket(bucket.width.value, bucket.height.value)
-    val mine = actual.filter { WidgetLayout.bucket(it.width.value, it.height.value) == b }
+    val shownBucket = WidgetLayout.bucket(bucket.width.value, bucket.height.value)
+    val mine = actual.filter { WidgetLayout.bucket(it.width.value, it.height.value) == shownBucket }
     // the launcher never shows a bucket no real size maps to: skip its bitmaps, RemoteViews carry all of them
     if (actual.isNotEmpty() && mine.isEmpty()) { Box(GlanceModifier.fillMaxSize()) {}; return }
     val target = mine.maxByOrNull { it.width.value * it.height.value } ?: bucket
     val settings = (ctx.applicationContext as? App)?.repo?.prefs?.value ?: Settings()
-    val (light, dark) = schemes(ctx, o.theme, settings)
-    val a = o.opacity / 100f
+    val (light, dark) = schemes(ctx, options.theme, settings)
+    val surfaceAlpha = options.opacity / 100f
     GlanceTheme(colors = ColorProviders(light, dark)) {
-        val (type, cls) = WidgetLayout.pick(o.type, target.width.value, target.height.value)
+        val (type, sizeClass) = WidgetLayout.pick(options.type, target.width.value, target.height.value)
         Box(
             GlanceModifier.fillMaxSize().cornerRadius(24.dp)
-                .background(ColorProvider(day = light.surface.copy(alpha = a), night = dark.surface.copy(alpha = a)))
-                .clickable(tapAction(ctx, if (snap == null) TapAction.OPEN_NOW else o.tap)),
+                .background(ColorProvider(day = light.surface.copy(alpha = surfaceAlpha), night = dark.surface.copy(alpha = surfaceAlpha)))
+                .clickable(tapAction(ctx, if (snapshot == null) TapAction.OPEN_NOW else options.tap)),
         ) {
             // a bottom button gets its own strip: charts and axis labels run into that corner
-            val reserve = if (o.refresh == RefreshButton.BOTTOM && cls != SizeClass.SMALL) 22f else 0f
+            val reserve = if (options.refresh == RefreshButton.BOTTOM && sizeClass != SizeClass.SMALL) 22f else 0f
             Box(GlanceModifier.fillMaxSize().padding(start = PAD, top = PAD, end = PAD, bottom = PAD + reserve.dp),
                 contentAlignment = Alignment.CenterStart) {
-                if (snap == null) { Empty("No radar yet · open the app", cls, o.text.scale); return@Box }
-                val w = W(ctx, o, snap, now, light, dark, target.width.value, target.height.value - reserve, settings)
+                if (snapshot == null) { Empty("No radar yet · open the app", sizeClass, options.text.scale); return@Box }
+                val view = WidgetView(ctx, options, snapshot, now, light, dark, target.width.value, target.height.value - reserve, settings)
                 when (type) {
-                    WidgetType.SUMMARY -> Summary(w, cls)
-                    WidgetType.MINUTES -> Minutes(w, cls)
-                    WidgetType.HOURS -> Hours(w, cls)
-                    WidgetType.RADAR -> Radar(w, cls)
-                    WidgetType.COMBINED -> Combined(w)
+                    WidgetType.SUMMARY -> Summary(view, sizeClass)
+                    WidgetType.MINUTES -> Minutes(view, sizeClass)
+                    WidgetType.HOURS -> Hours(view, sizeClass)
+                    WidgetType.RADAR -> Radar(view, sizeClass)
+                    WidgetType.COMBINED -> Combined(view)
                 }
             }
-            if (o.refresh != RefreshButton.OFF) RefreshButtonOverlay(o.refresh, cls)
+            if (options.refresh != RefreshButton.OFF) RefreshButtonOverlay(options.refresh, sizeClass)
         }
     }
 }
 
 /** A small round button in a corner, over the content; runs one refresh whatever background updates are set to. */
 @Composable
-private fun RefreshButtonOverlay(at: RefreshButton, cls: SizeClass) {
-    val d = if (cls == SizeClass.SMALL) 24 else 30
+private fun RefreshButtonOverlay(at: RefreshButton, sizeClass: SizeClass) {
+    val diameter = if (sizeClass == SizeClass.SMALL) 24 else 30
     Box(GlanceModifier.fillMaxSize().padding(4.dp),
         contentAlignment = if (at == RefreshButton.TOP) Alignment.TopEnd else Alignment.BottomEnd) {
         Image(ImageProvider(R.drawable.ic_refresh), contentDescription = "Refresh now",
-            modifier = GlanceModifier.size(d.dp).cornerRadius((d / 2).dp).background(GlanceTheme.colors.secondaryContainer)
-                .padding((d / 5).dp).clickable(actionRunCallback<RefreshNow>()),
+            modifier = GlanceModifier.size(diameter.dp).cornerRadius((diameter / 2).dp).background(GlanceTheme.colors.secondaryContainer)
+                .padding((diameter / 5).dp).clickable(actionRunCallback<RefreshNow>()),
             colorFilter = ColorFilter.tint(GlanceTheme.colors.onSecondaryContainer))
     }
 }
 
 @Composable
-private fun Empty(msg: String, cls: SizeClass, t: Float) {
+private fun Empty(message: String, sizeClass: SizeClass, textScale: Float) {
     Column(GlanceModifier.fillMaxSize(), verticalAlignment = Alignment.CenterVertically) {
-        if (cls != SizeClass.SMALL) Text("Rain Nowcast", style = TextStyle(color = GlanceTheme.colors.primary, fontSize = (13 * t).sp, fontWeight = FontWeight.Medium))
-        Text(msg, maxLines = 2, style = TextStyle(color = GlanceTheme.colors.onSurface, fontSize = ((if (cls == SizeClass.SMALL) 13 else 16) * t).sp, fontWeight = FontWeight.Medium))
+        if (sizeClass != SizeClass.SMALL) Text("Rain Nowcast", style = TextStyle(color = GlanceTheme.colors.primary, fontSize = (13 * textScale).sp, fontWeight = FontWeight.Medium))
+        Text(message, maxLines = 2, style = TextStyle(color = GlanceTheme.colors.onSurface, fontSize = ((if (sizeClass == SizeClass.SMALL) 13 else 16) * textScale).sp, fontWeight = FontWeight.Medium))
     }
 }
 
 @Composable
-private fun AgeText(w: W, size: Int = 13, prefix: String? = null) {
-    val stale = Freshness.stale(w.age)
-    Text(listOfNotNull(prefix?.takeIf { it != w.s.source }, Freshness.text(w.age, w.s.source)).joinToString(" · "), maxLines = 1,
+private fun AgeText(view: WidgetView, size: Int = 13, prefix: String? = null) {
+    val stale = Freshness.stale(view.age)
+    Text(listOfNotNull(prefix?.takeIf { it != view.snapshot.source }, Freshness.text(view.age, view.snapshot.source)).joinToString(" · "), maxLines = 1,
         style = TextStyle(color = if (stale) GlanceTheme.colors.error else GlanceTheme.colors.onSurfaceVariant,
-            fontSize = w.sp(size), fontWeight = if (stale) FontWeight.Medium else FontWeight.Normal))
+            fontSize = view.sp(size), fontWeight = if (stale) FontWeight.Medium else FontWeight.Normal))
 }
 
 /** "40%" + region · age. */
 @Composable
-private fun Header(w: W, chanceSp: Int = 26) {
+private fun Header(view: WidgetView, chanceSp: Int = 26) {
     Row(GlanceModifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        w.chance?.let {
-            Text("$it%", style = TextStyle(color = GlanceTheme.colors.primary, fontSize = w.sp(chanceSp), fontWeight = FontWeight.Bold))
+        view.chance?.let {
+            Text("$it%", style = TextStyle(color = GlanceTheme.colors.primary, fontSize = view.sp(chanceSp), fontWeight = FontWeight.Bold))
             Spacer(GlanceModifier.width(10.dp))
         }
-        AgeText(w, prefix = w.s.region)
+        AgeText(view, prefix = view.snapshot.region)
     }
 }
 
 @Composable
-private fun Sentence(w: W, text: String = w.sentence, sp: Int = 15, lines: Int = 2) =
+private fun Sentence(view: WidgetView, text: String = view.sentence, sp: Int = 15, lines: Int = 2) =
     Text(text, maxLines = lines, modifier = GlanceModifier.fillMaxWidth(),
-        style = TextStyle(color = GlanceTheme.colors.onSurface, fontSize = w.sp(sp), fontWeight = FontWeight.Medium))
+        style = TextStyle(color = GlanceTheme.colors.onSurface, fontSize = view.sp(sp), fontWeight = FontWeight.Medium))
 
 @Composable
 private fun Chart(layers: List<Layer>, desc: String, modifier: GlanceModifier) {
-    val c = GlanceTheme.colors
+    val colors = GlanceTheme.colors
     Box(modifier.semantics { contentDescription = desc }) {
-        layers.forEach { l ->
-            val tint = when (l.ink) { Ink.MUTED -> c.onSurfaceVariant; Ink.BASE -> c.surfaceVariant; Ink.PRIMARY -> c.primary; Ink.ACCENT -> c.tertiary }
-            Image(ImageProvider(l.bitmap), contentDescription = null, modifier = GlanceModifier.fillMaxSize(),
+        layers.forEach { layer ->
+            val tint = when (layer.ink) { Ink.MUTED -> colors.onSurfaceVariant; Ink.BASE -> colors.surfaceVariant; Ink.PRIMARY -> colors.primary; Ink.ACCENT -> colors.tertiary }
+            Image(ImageProvider(layer.bitmap), contentDescription = null, modifier = GlanceModifier.fillMaxSize(),
                 contentScale = ContentScale.Fit, colorFilter = ColorFilter.tint(tint))
         }
     }
 }
 
 @Composable
-private fun MinuteChart(w: W, hDp: Float, axes: Boolean) {
-    val h = hDp.coerceAtLeast(16f)
-    Chart(WidgetCharts.minutes(w.s, w.now, w.iw, h, w.density, w.o.units, axes, w.t),
-        "Rain rate from 30 minutes ago to an hour ahead. ${w.sentence}", GlanceModifier.fillMaxWidth().height(h.dp))
+private fun MinuteChart(view: WidgetView, heightDp: Float, axes: Boolean) {
+    val height = heightDp.coerceAtLeast(16f)
+    Chart(WidgetCharts.minutes(view.snapshot, view.now, view.innerWidth, height, view.density, view.options.units, axes, view.textScale),
+        "Rain rate from 30 minutes ago to an hour ahead. ${view.sentence}", GlanceModifier.fillMaxWidth().height(height.dp))
 }
 
 @Composable
-private fun HourChart(w: W, hours: Int, hDp: Float) {
-    val h = hDp.coerceAtLeast(20f)
-    Chart(WidgetCharts.hours(w.s, w.now, hours, w.iw, h, w.density, w.t),
-        "Rain over the next $hours hours, in half hours; darker is likelier. ${hoursSentence(w)}",
-        GlanceModifier.fillMaxWidth().height(h.dp))
+private fun HourChart(view: WidgetView, hours: Int, heightDp: Float) {
+    val height = heightDp.coerceAtLeast(20f)
+    Chart(WidgetCharts.hours(view.snapshot, view.now, hours, view.innerWidth, height, view.density, view.textScale),
+        "Rain over the next $hours hours, in half hours; darker is likelier. ${hoursSentence(view)}",
+        GlanceModifier.fillMaxWidth().height(height.dp))
 }
 
-private fun hoursSentence(w: W): String {
-    val t0 = OutlookBars.floor30(w.now)
-    return OutlookBars.sentence(w.s.engineBars().filter { !it.start.isBefore(t0) }, ZoneId.systemDefault())
+private fun hoursSentence(view: WidgetView): String {
+    val start = OutlookBars.floor30(view.now)
+    return OutlookBars.sentence(view.snapshot.engineBars().filter { !it.start.isBefore(start) }, ZoneId.systemDefault())
 }
 
 @Composable
-private fun Summary(w: W, cls: SizeClass) {
-    if (cls == SizeClass.SMALL) {
+private fun Summary(view: WidgetView, sizeClass: SizeClass) {
+    if (sizeClass == SizeClass.SMALL) {
         Row(GlanceModifier.fillMaxSize(), verticalAlignment = Alignment.CenterVertically) {
-            w.chance?.let {
-                Text("$it%", style = TextStyle(color = GlanceTheme.colors.primary, fontSize = w.sp(if (w.t > 1.2f) 20 else 24), fontWeight = FontWeight.Bold))
+            view.chance?.let {
+                Text("$it%", style = TextStyle(color = GlanceTheme.colors.primary, fontSize = view.sp(if (view.textScale > 1.2f) 20 else 24), fontWeight = FontWeight.Bold))
                 Spacer(GlanceModifier.width(8.dp))
             }
             Column(GlanceModifier.defaultWeight().fillMaxHeight(), verticalAlignment = Alignment.CenterVertically) {
                 // larger text: the sentence gets two lines and the age shows only when it is a warning
-                val roomy = w.t == 1f
+                val roomy = view.textScale == 1f
                 // a 2×1 has 56 dp inside: two lines fit up to Large, so Extra large stays at Large here
-                Sentence(w, w.short, sp = if (w.t > 1.2f) 12 else 14, lines = if (roomy) 1 else 2)
-                if (roomy || Freshness.stale(w.age)) AgeText(w, 12)
+                Sentence(view, view.short, sp = if (view.textScale > 1.2f) 12 else 14, lines = if (roomy) 1 else 2)
+                if (roomy || Freshness.stale(view.age)) AgeText(view, 12)
             }
         }
         return
     }
-    val big = cls == SizeClass.LARGE
+    val big = sizeClass == SizeClass.LARGE
     Column(GlanceModifier.fillMaxSize(), verticalAlignment = Alignment.CenterVertically) {
-        Header(w, if (big) 34 else 26)
+        Header(view, if (big) 34 else 26)
         Spacer(GlanceModifier.height(4.dp))
-        Sentence(w, sp = if (big) 18 else 15, lines = if (big) 3 else 2)
+        Sentence(view, sp = if (big) 18 else 15, lines = if (big) 3 else 2)
         Spacer(GlanceModifier.height(if (big) 16.dp else 10.dp))
-        val a = w.age
-        val cells = (0 until 6).map { k -> w.s.minutes.indices.filter { w.s.minutes[it] - a in k * 10 until k * 10 + 10 }.maxOfOrNull { w.s.prob[it] } ?: 0f }
+        val age = view.age
+        val cells = (0 until 6).map { k -> view.snapshot.minutes.indices.filter { view.snapshot.minutes[it] - age in k * 10 until k * 10 + 10 }.maxOfOrNull { view.snapshot.probability[it] } ?: 0f }
         Row(GlanceModifier.fillMaxWidth().height(if (big) 16.dp else 10.dp)
             .semantics { contentDescription = "Rain chance in each 10 minutes of the next hour, up to ${Math.rint(100.0 * (cells.maxOrNull() ?: 0f)).toInt()}%" }) {
             // Glance rows hold at most 10 children: gaps are padding, not spacers
-            cells.forEachIndexed { i, p ->
+            cells.forEachIndexed { i, chance ->
                 Box(GlanceModifier.defaultWeight().fillMaxHeight().padding(end = if (i < cells.size - 1) 4.dp else 0.dp)) {
-                    Box(GlanceModifier.fillMaxSize().cornerRadius(3.dp).background(w.mix(p))) {}
+                    Box(GlanceModifier.fillMaxSize().cornerRadius(3.dp).background(view.mix(chance))) {}
                 }
             }
         }
         Spacer(GlanceModifier.height(4.dp))
         Row(GlanceModifier.fillMaxWidth()) {
-            Text("now", style = TextStyle(color = GlanceTheme.colors.onSurfaceVariant, fontSize = w.sp(12)))
+            Text("now", style = TextStyle(color = GlanceTheme.colors.onSurfaceVariant, fontSize = view.sp(12)))
             Spacer(GlanceModifier.defaultWeight())
-            Text("+60 min", style = TextStyle(color = GlanceTheme.colors.onSurfaceVariant, fontSize = w.sp(12)))
+            Text("+60 min", style = TextStyle(color = GlanceTheme.colors.onSurfaceVariant, fontSize = view.sp(12)))
         }
         if (big) {
             Spacer(GlanceModifier.height(18.dp))
-            Text("Next 12 h", style = TextStyle(color = GlanceTheme.colors.onSurfaceVariant, fontSize = w.sp(12)))
-            HourChart(w, 12, 64f)
+            Text("Next 12 h", style = TextStyle(color = GlanceTheme.colors.onSurfaceVariant, fontSize = view.sp(12)))
+            HourChart(view, 12, 64f)
         }
     }
 }
 
 @Composable
-private fun Minutes(w: W, cls: SizeClass) {
-    if (cls == SizeClass.SMALL) {
+private fun Minutes(view: WidgetView, sizeClass: SizeClass) {
+    if (sizeClass == SizeClass.SMALL) {
         Column(GlanceModifier.fillMaxSize()) {
             Row(GlanceModifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                w.chance?.let { Text("$it% ", style = TextStyle(color = GlanceTheme.colors.primary, fontSize = w.sp(14), fontWeight = FontWeight.Bold)) }
-                Text(w.short, maxLines = 1, style = TextStyle(color = GlanceTheme.colors.onSurface, fontSize = w.sp(13), fontWeight = FontWeight.Medium))
+                view.chance?.let { Text("$it% ", style = TextStyle(color = GlanceTheme.colors.primary, fontSize = view.sp(14), fontWeight = FontWeight.Bold)) }
+                Text(view.short, maxLines = 1, style = TextStyle(color = GlanceTheme.colors.onSurface, fontSize = view.sp(13), fontWeight = FontWeight.Medium))
             }
-            MinuteChart(w, w.ih - w.px(19), axes = false)
+            MinuteChart(view, view.innerHeight - view.px(19), axes = false)
         }
         return
     }
-    val big = cls == SizeClass.LARGE
+    val big = sizeClass == SizeClass.LARGE
     Column(GlanceModifier.fillMaxSize()) {
-        Header(w, if (big) 26 else 18)
-        Sentence(w, sp = if (big) 15 else 13, lines = 2)
+        Header(view, if (big) 26 else 18)
+        Sentence(view, sp = if (big) 15 else 13, lines = 2)
         Spacer(GlanceModifier.height(4.dp))
-        MinuteChart(w, w.ih - w.px((if (big) 34 else 24) + (if (big) 40 else 36)) - 4, axes = true)
+        MinuteChart(view, view.innerHeight - view.px((if (big) 34 else 24) + (if (big) 40 else 36)) - 4, axes = true)
     }
 }
 
 @Composable
-private fun Hours(w: W, cls: SizeClass) {
-    val hours = WidgetLayout.hours(cls)
+private fun Hours(view: WidgetView, sizeClass: SizeClass) {
+    val hours = WidgetLayout.hours(sizeClass)
     Column(GlanceModifier.fillMaxSize()) {
-        if (cls == SizeClass.SMALL) {
+        if (sizeClass == SizeClass.SMALL) {
             Row(GlanceModifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text("Next 12\u00A0h", style = TextStyle(color = GlanceTheme.colors.onSurface, fontSize = w.sp(13), fontWeight = FontWeight.Medium))
+                Text("Next 12\u00A0h", style = TextStyle(color = GlanceTheme.colors.onSurface, fontSize = view.sp(13), fontWeight = FontWeight.Medium))
                 Spacer(GlanceModifier.defaultWeight())
-                AgeText(w, 12)
+                AgeText(view, 12)
             }
-            HourChart(w, hours, w.ih - w.px(17))
+            HourChart(view, hours, view.innerHeight - view.px(17))
         } else {
-            val big = cls == SizeClass.LARGE
-            Sentence(w, RainWords.widget(hoursSentence(w), RainUnits.MMH, false), sp = if (big) 16 else 13, lines = 2)
-            AgeText(w, 12, prefix = "Next $hours\u00A0h")
+            val big = sizeClass == SizeClass.LARGE
+            Sentence(view, RainWords.widget(hoursSentence(view), RainUnits.MMH, false), sp = if (big) 16 else 13, lines = 2)
+            AgeText(view, 12, prefix = "Next $hours\u00A0h")
             Spacer(GlanceModifier.height(6.dp))
-            HourChart(w, hours, w.ih - w.px((if (big) 42 else 36) + 16) - 6)
+            HourChart(view, hours, view.innerHeight - view.px((if (big) 42 else 36) + 16) - 6)
         }
     }
 }
 
 @Composable
-private fun Radar(w: W, cls: SizeClass) {
-    val r = w.s.radar
-    val f = r?.frame(w.o.lead)
-    if (r == null || f == null) {
-        Empty(if (w.s.source == Snapshot.SOURCE_OPEN_METEO) "No radar map in Open-Meteo mode" else "No radar yet · open the app", cls, w.t)
+private fun Radar(view: WidgetView, sizeClass: SizeClass) {
+    val radar = view.snapshot.radar
+    val frame = radar?.frame(view.options.lead)
+    if (radar == null || frame == null) {
+        Empty(if (view.snapshot.source == Snapshot.SOURCE_OPEN_METEO) "No radar map in Open-Meteo mode" else "No radar yet · open the app", sizeClass, view.textScale)
         return
     }
-    val t = HM.format(Instant.ofEpochSecond(w.s.issued + 60L * f.lead).atZone(ZoneId.systemDefault()))
-    val what = if (f.lead == 0) "Radar $t" else "Forecast $t (+${f.lead} min)"
-    if (cls == SizeClass.LARGE) {
+    val time = TIME_FORMAT.format(Instant.ofEpochSecond(view.snapshot.issued + 60L * frame.lead).atZone(ZoneId.systemDefault()))
+    val what = if (frame.lead == 0) "Radar $time" else "Forecast $time (+${frame.lead} min)"
+    if (sizeClass == SizeClass.LARGE) {
         Column(GlanceModifier.fillMaxSize()) {
-            Header(w, 20)
-            Sentence(w, sp = 13, lines = 2)
+            Header(view, 20)
+            Sentence(view, sp = 13, lines = 2)
             Spacer(GlanceModifier.height(6.dp))
             Row(GlanceModifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
-                RadarMap(w, r, f, min(w.iw, w.ih - w.px(28 + 36 + 20) - 6), what)
+                RadarMap(view, radar, frame, min(view.innerWidth, view.innerHeight - view.px(28 + 36 + 20) - 6), what)
             }
             Spacer(GlanceModifier.height(4.dp))
             Text(what, modifier = GlanceModifier.fillMaxWidth(),
-                style = TextStyle(color = GlanceTheme.colors.onSurfaceVariant, fontSize = w.sp(13), textAlign = androidx.glance.text.TextAlign.Center))
+                style = TextStyle(color = GlanceTheme.colors.onSurfaceVariant, fontSize = view.sp(13), textAlign = androidx.glance.text.TextAlign.Center))
         }
         return
     }
     Row(GlanceModifier.fillMaxSize(), verticalAlignment = Alignment.CenterVertically) {
-        RadarMap(w, r, f, min(w.ih, w.iw * 0.45f), what)
+        RadarMap(view, radar, frame, min(view.innerHeight, view.innerWidth * 0.45f), what)
         Spacer(GlanceModifier.width(10.dp))
         Column(GlanceModifier.defaultWeight()) {
-            if (cls == SizeClass.MEDIUM) {
-                w.chance?.let { Text("$it%", style = TextStyle(color = GlanceTheme.colors.primary, fontSize = w.sp(20), fontWeight = FontWeight.Bold)) }
-                Sentence(w, sp = 13, lines = 3)
+            if (sizeClass == SizeClass.MEDIUM) {
+                view.chance?.let { Text("$it%", style = TextStyle(color = GlanceTheme.colors.primary, fontSize = view.sp(20), fontWeight = FontWeight.Bold)) }
+                Sentence(view, sp = 13, lines = 3)
                 Spacer(GlanceModifier.height(4.dp))
             }
-            Text(what, maxLines = 1, style = TextStyle(color = GlanceTheme.colors.onSurface, fontSize = w.sp(13), fontWeight = FontWeight.Medium))
-            AgeText(w, 12)
+            Text(what, maxLines = 1, style = TextStyle(color = GlanceTheme.colors.onSurface, fontSize = view.sp(13), fontWeight = FontWeight.Medium))
+            AgeText(view, 12)
         }
     }
 }
 
 @Composable
-private fun RadarMap(w: W, r: SRadar, f: SFrame, sizeDp: Float, what: String) {
-    val s = sizeDp.coerceAtLeast(24f)
-    Box(GlanceModifier.size(s.dp).cornerRadius(14.dp).background(GlanceTheme.colors.surfaceVariant)) {
-        Image(ImageProvider(WidgetCharts.rain(f, r, w.lut)), contentDescription = null, modifier = GlanceModifier.fillMaxSize(),
+private fun RadarMap(view: WidgetView, radar: SRadar, frame: SFrame, sizeDp: Float, what: String) {
+    val side = sizeDp.coerceAtLeast(24f)
+    Box(GlanceModifier.size(side.dp).cornerRadius(14.dp).background(GlanceTheme.colors.surfaceVariant)) {
+        Image(ImageProvider(WidgetCharts.rain(frame, radar, view.lut)), contentDescription = null, modifier = GlanceModifier.fillMaxSize(),
             contentScale = ContentScale.Fit)
-        Chart(WidgetCharts.radarMarks(w.ctx, r, s, w.density),
-            "$what around home, ${Snapshot.HALF_KM.toInt() * 2} km across. ${w.sentence}", GlanceModifier.fillMaxSize())
+        Chart(WidgetCharts.radarMarks(view.ctx, radar, side, view.density),
+            "$what around home, ${Snapshot.HALF_KM.toInt() * 2} km across. ${view.sentence}", GlanceModifier.fillMaxSize())
     }
 }
 
 @Composable
-private fun Combined(w: W) {
+private fun Combined(view: WidgetView) {
     Column(GlanceModifier.fillMaxSize()) {
-        Header(w, 26)
-        Sentence(w, sp = 15, lines = 2)
+        Header(view, 26)
+        Sentence(view, sp = 15, lines = 2)
         Spacer(GlanceModifier.height(4.dp))
         val bars = 62f
-        MinuteChart(w, w.ih - w.px(34 + 40) - 4 - 8 - bars, axes = true)
+        MinuteChart(view, view.innerHeight - view.px(34 + 40) - 4 - 8 - bars, axes = true)
         Spacer(GlanceModifier.height(8.dp))
-        HourChart(w, 12, bars)
+        HourChart(view, 12, bars)
     }
 }

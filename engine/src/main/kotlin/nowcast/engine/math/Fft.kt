@@ -11,13 +11,13 @@ import kotlin.math.sin
  * [inverse] is unscaled too (Fft2 divides). Immutable, so one instance serves all threads.
  */
 class Fft(val n: Int) {
-    private val twr = DoubleArray(n) { cos(-2.0 * PI * it / n) }
-    private val twi = DoubleArray(n) { sin(-2.0 * PI * it / n) }
+    private val twiddleRe = DoubleArray(n) { cos(-2.0 * PI * it / n) }
+    private val twiddleIm = DoubleArray(n) { sin(-2.0 * PI * it / n) }
     private val factors: IntArray
 
     init {
         require(n >= 1)
-        val f = ArrayList<Int>()
+        val found = ArrayList<Int>()
         var m = n; var p = 4
         val root = kotlin.math.floor(kotlin.math.sqrt(n.toDouble())).toInt()
         while (m > 1) {
@@ -25,18 +25,18 @@ class Fft(val n: Int) {
                 p = when (p) { 4 -> 2; 2 -> 3; else -> p + 2 }
                 if (p > root) p = m
             }
-            m /= p; f += p; f += m
+            m /= p; found += p; found += m
         }
-        if (f.isEmpty()) { f += 1; f += 1 }
-        factors = f.toIntArray()
+        if (found.isEmpty()) { found += 1; found += 1 }
+        factors = found.toIntArray()
     }
 
     /** out = DFT(in), in read at inOff + j*inStride. */
     fun transform(inRe: DoubleArray, inIm: DoubleArray, inOff: Int, inStride: Int,
-                  outRe: DoubleArray, outIm: DoubleArray, inverse: Boolean, sc: Scratch = scratch()) {
+                  outRe: DoubleArray, outIm: DoubleArray, inverse: Boolean, buffers: Scratch = scratch()) {
         if (n == 1) { outRe[0] = inRe[inOff]; outIm[0] = inIm[inOff]; return }
-        if (inner != null) bluestein(inRe, inIm, inOff, inStride, outRe, outIm, inverse, sc)
-        else work(outRe, outIm, 0, inRe, inIm, inOff, 1, inStride, 0, inverse, sc.sc)
+        if (inner != null) bluestein(inRe, inIm, inOff, inStride, outRe, outIm, inverse, buffers)
+        else work(outRe, outIm, 0, inRe, inIm, inOff, 1, inStride, 0, inverse, buffers.sc)
     }
 
     private val maxP = (0 until factors.size step 2).maxOf { factors[it] }
@@ -44,24 +44,24 @@ class Fft(val n: Int) {
     // Bluestein: the DFT as a convolution with the chirp w_k = exp(-i pi k^2/n), done by power-of-2
     // FFTs of m >= 2n-1 points: O(m log m) instead of the odd butterfly's O(n p). Measured on the JVM it
     // only pays for big primes: 2x on 397, 1.4x on 331, a tie on 382 = 2*191, 2-3x slower on 366 = 2*3*61.
-    private val m2 = (Integer.highestOneBit(2 * n - 1) shl 1).let { m ->
+    private val chirpSize = (Integer.highestOneBit(2 * n - 1) shl 1).let { m ->
         if (n.toLong() * maxP > 8L * m * Integer.numberOfTrailingZeros(m)) m else 0 }
-    private val inner = if (m2 > 0) Fft(m2) else null
-    private val cr = DoubleArray(if (m2 > 0) n else 0); private val ci = DoubleArray(cr.size)
+    private val inner = if (chirpSize > 0) Fft(chirpSize) else null
+    private val chirpRe = DoubleArray(if (chirpSize > 0) n else 0); private val chirpIm = DoubleArray(chirpRe.size)
     /** FFT of the conjugate chirp (forward) and of the chirp (inverse), wrapped and scaled by 1/m. */
-    private val bf = arrayOf(DoubleArray(m2), DoubleArray(m2)); private val bi = arrayOf(DoubleArray(m2), DoubleArray(m2))
+    private val chirpFftRe = arrayOf(DoubleArray(chirpSize), DoubleArray(chirpSize)); private val chirpFftIm = arrayOf(DoubleArray(chirpSize), DoubleArray(chirpSize))
 
     init {
         if (inner != null) {
             for (k in 0 until n) {
                 val a = PI * ((k.toLong() * k) % (2L * n)) / n   // k^2 mod 2n keeps the angle exact
-                cr[k] = cos(a); ci[k] = -sin(a)
+                chirpRe[k] = cos(a); chirpIm[k] = -sin(a)
             }
-            val sc = inner.scratch()
-            for ((t, sg) in listOf(0 to -1.0, 1 to 1.0)) {
-                val r = DoubleArray(m2); val i = DoubleArray(m2)
-                for (k in 0 until n) { r[k] = cr[k] / m2; i[k] = sg * ci[k] / m2; if (k > 0) { r[m2 - k] = r[k]; i[m2 - k] = i[k] } }
-                inner.transform(r, i, 0, 1, bf[t], bi[t], false, sc)
+            val buffers = inner.scratch()
+            for ((direction, sign) in listOf(0 to -1.0, 1 to 1.0)) {
+                val r = DoubleArray(chirpSize); val i = DoubleArray(chirpSize)
+                for (k in 0 until n) { r[k] = chirpRe[k] / chirpSize; i[k] = sign * chirpIm[k] / chirpSize; if (k > 0) { r[chirpSize - k] = r[k]; i[chirpSize - k] = i[k] } }
+                inner.transform(r, i, 0, 1, chirpFftRe[direction], chirpFftIm[direction], false, buffers)
             }
         }
     }
@@ -72,50 +72,50 @@ class Fft(val n: Int) {
         internal val ar = DoubleArray(m); internal val ai = DoubleArray(m)
         internal val br = DoubleArray(m); internal val bj = DoubleArray(m)
     }
-    fun scratch(): Scratch = Scratch(if (inner == null) maxP else 0, m2, inner?.scratch())
+    fun scratch(): Scratch = Scratch(if (inner == null) maxP else 0, chirpSize, inner?.scratch())
 
     private fun bluestein(inRe: DoubleArray, inIm: DoubleArray, inOff: Int, inStride: Int,
-                          outRe: DoubleArray, outIm: DoubleArray, inv: Boolean, s: Scratch) {
+                          outRe: DoubleArray, outIm: DoubleArray, inverse: Boolean, buffers: Scratch) {
         // the inverse is the same with the chirp conjugated
-        val sg = if (inv) -1.0 else 1.0
-        val ar = s.ar; val ai = s.ai; val br = s.br; val bj = s.bj
+        val sign = if (inverse) -1.0 else 1.0
+        val ar = buffers.ar; val ai = buffers.ai; val br = buffers.br; val bj = buffers.bj
         for (j in 0 until n) {
             val xr = inRe[inOff + j * inStride]; val xi = inIm[inOff + j * inStride]
-            val wr = cr[j]; val wi = sg * ci[j]
+            val wr = chirpRe[j]; val wi = sign * chirpIm[j]
             ar[j] = xr * wr - xi * wi; ai[j] = xr * wi + xi * wr
         }
-        ar.fill(0.0, n, m2); ai.fill(0.0, n, m2)
-        inner!!.transform(ar, ai, 0, 1, br, bj, false, s.inner!!)
-        val t = if (inv) 1 else 0; val fr = bf[t]; val fi = bi[t]
-        for (k in 0 until m2) { val r = br[k]; val i = bj[k]; br[k] = r * fr[k] - i * fi[k]; bj[k] = r * fi[k] + i * fr[k] }
-        inner.transform(br, bj, 0, 1, ar, ai, true, s.inner)
+        ar.fill(0.0, n, chirpSize); ai.fill(0.0, n, chirpSize)
+        inner!!.transform(ar, ai, 0, 1, br, bj, false, buffers.inner!!)
+        val direction = if (inverse) 1 else 0; val fr = chirpFftRe[direction]; val fi = chirpFftIm[direction]
+        for (k in 0 until chirpSize) { val r = br[k]; val i = bj[k]; br[k] = r * fr[k] - i * fi[k]; bj[k] = r * fi[k] + i * fr[k] }
+        inner.transform(br, bj, 0, 1, ar, ai, true, buffers.inner)
         for (k in 0 until n) {
-            val wr = cr[k]; val wi = sg * ci[k]
+            val wr = chirpRe[k]; val wi = sign * chirpIm[k]
             outRe[k] = ar[k] * wr - ai[k] * wi; outIm[k] = ar[k] * wi + ai[k] * wr
         }
     }
 
     private fun work(oRe: DoubleArray, oIm: DoubleArray, oOff: Int, fRe: DoubleArray, fIm: DoubleArray,
-                     fOff: Int, fstride: Int, inStride: Int, fi: Int, inv: Boolean, sc: DoubleArray) {
-        val p = factors[fi]; val m = factors[fi + 1]
+                     fOff: Int, fstride: Int, inStride: Int, factorIndex: Int, inverse: Boolean, sc: DoubleArray) {
+        val p = factors[factorIndex]; val m = factors[factorIndex + 1]
         if (m == 1) {
             for (j in 0 until p) { val s = fOff + j * fstride * inStride; oRe[oOff + j] = fRe[s]; oIm[oOff + j] = fIm[s] }
         } else {
             for (j in 0 until p) work(oRe, oIm, oOff + j * m, fRe, fIm, fOff + j * fstride * inStride,
-                fstride * p, inStride, fi + 2, inv, sc)
+                fstride * p, inStride, factorIndex + 2, inverse, sc)
         }
         when (p) {
-            2 -> bfly2(oRe, oIm, oOff, fstride, m, inv)
-            4 -> bfly4(oRe, oIm, oOff, fstride, m, inv)
-            else -> bflyOdd(oRe, oIm, oOff, fstride, p, m, inv, sc)
+            2 -> bfly2(oRe, oIm, oOff, fstride, m, inverse)
+            4 -> bfly4(oRe, oIm, oOff, fstride, m, inverse)
+            else -> bflyOdd(oRe, oIm, oOff, fstride, p, m, inverse, sc)
         }
     }
 
-    private fun bfly2(re: DoubleArray, im: DoubleArray, off: Int, fstride: Int, m: Int, inv: Boolean) {
-        val sg = if (inv) -1.0 else 1.0
+    private fun bfly2(re: DoubleArray, im: DoubleArray, off: Int, fstride: Int, m: Int, inverse: Boolean) {
+        val sign = if (inverse) -1.0 else 1.0
         for (u in 0 until m) {
             val a = off + u; val b = a + m
-            val wr = twr[u * fstride]; val wi = sg * twi[u * fstride]
+            val wr = twiddleRe[u * fstride]; val wi = sign * twiddleIm[u * fstride]
             val tr = re[b] * wr - im[b] * wi; val ti = re[b] * wi + im[b] * wr
             re[b] = re[a] - tr; im[b] = im[a] - ti
             re[a] += tr; im[a] += ti
@@ -123,13 +123,13 @@ class Fft(val n: Int) {
     }
 
     /** kf_bfly4 */
-    private fun bfly4(re: DoubleArray, im: DoubleArray, off: Int, fstride: Int, m: Int, inv: Boolean) {
-        val sg = if (inv) -1.0 else 1.0
+    private fun bfly4(re: DoubleArray, im: DoubleArray, off: Int, fstride: Int, m: Int, inverse: Boolean) {
+        val sign = if (inverse) -1.0 else 1.0
         for (u in 0 until m) {
             val i0 = off + u; val i1 = i0 + m; val i2 = i1 + m; val i3 = i2 + m
             val t1 = u * fstride; val t2 = 2 * t1; val t3 = 3 * t1
-            val w1r = twr[t1]; val w1i = sg * twi[t1]; val w2r = twr[t2]; val w2i = sg * twi[t2]
-            val w3r = twr[t3]; val w3i = sg * twi[t3]
+            val w1r = twiddleRe[t1]; val w1i = sign * twiddleIm[t1]; val w2r = twiddleRe[t2]; val w2i = sign * twiddleIm[t2]
+            val w3r = twiddleRe[t3]; val w3i = sign * twiddleIm[t3]
             val s0r = re[i1] * w1r - im[i1] * w1i; val s0i = re[i1] * w1i + im[i1] * w1r
             val s1r = re[i2] * w2r - im[i2] * w2i; val s1i = re[i2] * w2i + im[i2] * w2r
             val s2r = re[i3] * w3r - im[i3] * w3i; val s2i = re[i3] * w3i + im[i3] * w3r
@@ -139,7 +139,7 @@ class Fft(val n: Int) {
             val s4r = s0r - s2r; val s4i = s0i - s2i
             re[i2] = ar - s3r; im[i2] = ai - s3i
             re[i0] = ar + s3r; im[i0] = ai + s3i
-            if (inv) {
+            if (inverse) {
                 re[i1] = s5r - s4i; im[i1] = s5i + s4r
                 re[i3] = s5r + s4i; im[i3] = s5i - s4r
             } else {
@@ -158,8 +158,8 @@ class Fft(val n: Int) {
 
     /** Odd radix (the factoriser takes every 2 first): twiddle the inputs, then a p-point DFT
      *  that pairs q with p-q, whose weights are conjugate - a quarter of the generic multiplies. */
-    private fun bflyOdd(re: DoubleArray, im: DoubleArray, off: Int, fstride: Int, p: Int, m: Int, inv: Boolean, sc: DoubleArray) {
-        val sg = if (inv) -1.0 else 1.0
+    private fun bflyOdd(re: DoubleArray, im: DoubleArray, off: Int, fstride: Int, p: Int, m: Int, inverse: Boolean, sc: DoubleArray) {
+        val sign = if (inverse) -1.0 else 1.0
         val sr = sc; val si = sc   // sc: [0, p) inputs re, [p, 2p) im, [2p, 4p) a_q / b_q re, im
         val step = n / p; val hp = (p - 1) / 2
         for (u in 0 until m) {
@@ -168,7 +168,7 @@ class Fft(val n: Int) {
             for (q in 1 until p) {
                 tw += fstride * u; if (tw >= n) tw -= n
                 val k = off + u + q * m
-                val wr = twr[tw]; val wi = sg * twi[tw]
+                val wr = twiddleRe[tw]; val wi = sign * twiddleIm[tw]
                 sr[q] = re[k] * wr - im[k] * wi; si[p + q] = re[k] * wi + im[k] * wr
             }
             var x0r = sr[0]; var x0i = si[p]
@@ -194,13 +194,13 @@ class Fft(val n: Int) {
                     t2 += d2; if (t2 >= n) t2 -= n
                     t3 += d3; if (t3 >= n) t3 -= n
                     val ar = sc[2 * p + p - q]; val ai = sc[3 * p + p - q]; val br = sc[2 * p + q]; val bi = sc[3 * p + q]
-                    var wr = twr[t0]; var wi = sg * twi[t0]
+                    var wr = twiddleRe[t0]; var wi = sign * twiddleIm[t0]
                     tr0 += ar * wr; ti0 += ai * wr; ur0 += br * wi; ui0 += bi * wi
-                    wr = twr[t1]; wi = sg * twi[t1]
+                    wr = twiddleRe[t1]; wi = sign * twiddleIm[t1]
                     tr1 += ar * wr; ti1 += ai * wr; ur1 += br * wi; ui1 += bi * wi
-                    wr = twr[t2]; wi = sg * twi[t2]
+                    wr = twiddleRe[t2]; wi = sign * twiddleIm[t2]
                     tr2 += ar * wr; ti2 += ai * wr; ur2 += br * wi; ui2 += bi * wi
-                    wr = twr[t3]; wi = sg * twi[t3]
+                    wr = twiddleRe[t3]; wi = sign * twiddleIm[t3]
                     tr3 += ar * wr; ti3 += ai * wr; ur3 += br * wi; ui3 += bi * wi
                 }
                 out(re, im, off + u, m, p, q1, tr0, ti0, ur0, ui0)
@@ -214,7 +214,7 @@ class Fft(val n: Int) {
                 var t = 0
                 for (q in 1..hp) {
                     t += q1 * step; if (t >= n) t -= n
-                    val wr = twr[t]; val wi = sg * twi[t]
+                    val wr = twiddleRe[t]; val wi = sign * twiddleIm[t]
                     tr += sc[2 * p + p - q] * wr; ti += sc[3 * p + p - q] * wr
                     ur += sc[2 * p + q] * wi; ui += sc[3 * p + q] * wi
                 }
@@ -226,32 +226,32 @@ class Fft(val n: Int) {
     }
 }
 
-/** Row-major 2-D FFT, in place. [inverse] divides by h*w, as numpy's ifft2. */
-class Fft2(val h: Int, val w: Int, private val par: Par = Par.SERIAL) {
-    private val rows = Fft(w)
-    private val cols = Fft(h)
+/** Row-major 2-D FFT, in place. [inverse] divides by rows * cols, as numpy's ifft2. */
+class Fft2(val rows: Int, val cols: Int, private val par: Par = Par.SERIAL) {
+    private val rowFft = Fft(cols)
+    private val colFft = Fft(rows)
 
     fun forward(re: DoubleArray, im: DoubleArray) = run(re, im, false)
     fun inverse(re: DoubleArray, im: DoubleArray) {
         run(re, im, true)
-        val s = 1.0 / (h * w)
-        for (i in re.indices) { re[i] *= s; im[i] *= s }
+        val scale = 1.0 / (rows * cols)
+        for (i in re.indices) { re[i] *= scale; im[i] *= scale }
     }
 
     /** Rows, then columns; each 1-D transform is independent, so [par] splits them. */
-    private fun run(re: DoubleArray, im: DoubleArray, inv: Boolean) {
-        par.run(h) { a, b ->
-            val tr = DoubleArray(w); val ti = DoubleArray(w); val sc = rows.scratch()
-            for (r in a until b) {
-                rows.transform(re, im, r * w, 1, tr, ti, inv, sc)
-                System.arraycopy(tr, 0, re, r * w, w); System.arraycopy(ti, 0, im, r * w, w)
+    private fun run(re: DoubleArray, im: DoubleArray, inverse: Boolean) {
+        par.run(rows) { start, end ->
+            val rowRe = DoubleArray(cols); val rowIm = DoubleArray(cols); val buffers = rowFft.scratch()
+            for (row in start until end) {
+                rowFft.transform(re, im, row * cols, 1, rowRe, rowIm, inverse, buffers)
+                System.arraycopy(rowRe, 0, re, row * cols, cols); System.arraycopy(rowIm, 0, im, row * cols, cols)
             }
         }
-        par.run(w) { a, b ->
-            val cr = DoubleArray(h); val ci = DoubleArray(h); val sc = cols.scratch()
-            for (c in a until b) {
-                cols.transform(re, im, c, w, cr, ci, inv, sc)
-                for (r in 0 until h) { re[r * w + c] = cr[r]; im[r * w + c] = ci[r] }
+        par.run(cols) { start, end ->
+            val colRe = DoubleArray(rows); val colIm = DoubleArray(rows); val buffers = colFft.scratch()
+            for (col in start until end) {
+                colFft.transform(re, im, col, cols, colRe, colIm, inverse, buffers)
+                for (row in 0 until rows) { re[row * cols + col] = colRe[row]; im[row * cols + col] = colIm[row] }
             }
         }
     }

@@ -29,35 +29,35 @@ private val SWATCHES = listOf(0x1F5FA8, 0x2E7D7B, 0x3A8D3F, 0x8A6D1F, 0xC0592B, 
 @Composable
 fun ColorPickerDialog(title: String, initial: Int, onDismiss: () -> Unit, onPick: (Int) -> Unit) {
     val start = remember { FloatArray(3).also { android.graphics.Color.colorToHSV(initial or 0xFF000000.toInt(), it) } }
-    var h by remember { mutableFloatStateOf(start[0]) }
-    var s by remember { mutableFloatStateOf(start[1]) }
-    var v by remember { mutableFloatStateOf(start[2]) }
-    val rgb = android.graphics.Color.HSVToColor(floatArrayOf(h, s, v)) and 0xFFFFFF
+    var hue by remember { mutableFloatStateOf(start[0]) }
+    var saturation by remember { mutableFloatStateOf(start[1]) }
+    var brightness by remember { mutableFloatStateOf(start[2]) }
+    val rgb = android.graphics.Color.HSVToColor(floatArrayOf(hue, saturation, brightness)) and 0xFFFFFF
     var hex by remember { mutableStateOf(Settings.hex(initial)) }
-    fun set(c: Int) {
-        val t = FloatArray(3).also { android.graphics.Color.colorToHSV(c or 0xFF000000.toInt(), it) }
-        h = t[0]; s = t[1]; v = t[2]; hex = Settings.hex(c)
+    fun set(color: Int) {
+        val hsv = FloatArray(3).also { android.graphics.Color.colorToHSV(color or 0xFF000000.toInt(), it) }
+        hue = hsv[0]; saturation = hsv[1]; brightness = hsv[2]; hex = Settings.hex(color)
     }
     AlertDialog(onDismiss, title = { Text(title) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Box(Modifier.fillMaxWidth().height(48.dp).clip(RoundedCornerShape(16.dp)).background(rgbColor(rgb)))
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    SWATCHES.forEach { c ->
-                        Box(Modifier.weight(1f).aspectRatio(1f).clip(CircleShape).background(rgbColor(c)).clickable { set(c) }
-                            .semantics { contentDescription = "#${Settings.hex(c)}" })
+                    SWATCHES.forEach { swatch ->
+                        Box(Modifier.weight(1f).aspectRatio(1f).clip(CircleShape).background(rgbColor(swatch)).clickable { set(swatch) }
+                            .semantics { contentDescription = "#${Settings.hex(swatch)}" })
                     }
                 }
-                Channel("Hue", h, 0f..360f, Brush.horizontalGradient((0..6).map { Color.hsv(it * 60f % 360f, 1f, 1f) })) {
-                    h = it; hex = Settings.hex(android.graphics.Color.HSVToColor(floatArrayOf(h, s, v)))
+                Channel("Hue", hue, 0f..360f, Brush.horizontalGradient((0..6).map { Color.hsv(it * 60f % 360f, 1f, 1f) })) {
+                    hue = it; hex = Settings.hex(android.graphics.Color.HSVToColor(floatArrayOf(hue, saturation, brightness)))
                 }
-                Channel("Saturation", s, 0f..1f, Brush.horizontalGradient(listOf(Color.hsv(h, 0f, v), Color.hsv(h, 1f, v)))) {
-                    s = it; hex = Settings.hex(android.graphics.Color.HSVToColor(floatArrayOf(h, s, v)))
+                Channel("Saturation", saturation, 0f..1f, Brush.horizontalGradient(listOf(Color.hsv(hue, 0f, brightness), Color.hsv(hue, 1f, brightness)))) {
+                    saturation = it; hex = Settings.hex(android.graphics.Color.HSVToColor(floatArrayOf(hue, saturation, brightness)))
                 }
-                Channel("Brightness", v, 0f..1f, Brush.horizontalGradient(listOf(Color.Black, Color.hsv(h, s, 1f)))) {
-                    v = it; hex = Settings.hex(android.graphics.Color.HSVToColor(floatArrayOf(h, s, v)))
+                Channel("Brightness", brightness, 0f..1f, Brush.horizontalGradient(listOf(Color.Black, Color.hsv(hue, saturation, 1f)))) {
+                    brightness = it; hex = Settings.hex(android.graphics.Color.HSVToColor(floatArrayOf(hue, saturation, brightness)))
                 }
-                OutlinedTextField(hex, { t -> hex = t.take(6); Settings.parseHex(t)?.let { c -> set(c); hex = t.take(6) } },
+                OutlinedTextField(hex, { typed -> hex = typed.take(6); Settings.parseHex(typed)?.let { color -> set(color); hex = typed.take(6) } },
                     singleLine = true, label = { Text("Hex") }, prefix = { Text("#") }, modifier = Modifier.fillMaxWidth())
             }
         },
@@ -78,7 +78,7 @@ private fun Channel(label: String, value: Float, range: ClosedFloatingPointRange
     }
 }
 
-private fun rateLabel(r: Double) = if (r % 1.0 == 0.0) "${r.toInt()} mm/h" else "$r mm/h"
+private fun rateLabel(rate: Double) = if (rate % 1.0 == 0.0) "${rate.toInt()} mm/h" else "$rate mm/h"
 
 /** One colour per rain rate; tap a row to change it. Saving selects the custom scale. */
 @Composable
@@ -93,13 +93,13 @@ fun RadarColorsDialog(current: List<Int>, onDismiss: () -> Unit, onSave: (List<I
                 Box(Modifier.fillMaxWidth().height(14.dp).clip(RoundedCornerShape(7.dp))
                     .background(Brush.horizontalGradient((0..255 step 15).map { rgbColor(lut[it]) })))
                 Spacer(Modifier.height(6.dp))
-                rates.forEachIndexed { i, r ->
+                rates.forEachIndexed { i, rate ->
                     Row(Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp)).clickable { editing = i }.padding(horizontal = 8.dp, vertical = 6.dp),
                         verticalAlignment = Alignment.CenterVertically) {
                         Box(Modifier.size(28.dp).clip(CircleShape).background(rgbColor(colors[i]))
                             .border(1.dp, MaterialTheme.colorScheme.outlineVariant, CircleShape))
                         Spacer(Modifier.width(14.dp))
-                        Text(rateLabel(r), style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
+                        Text(rateLabel(rate), style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
                         Text("#" + Settings.hex(colors[i]), style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
@@ -110,8 +110,8 @@ fun RadarColorsDialog(current: List<Int>, onDismiss: () -> Unit, onSave: (List<I
         confirmButton = { TextButton({ onSave(colors) }) { Text("Save") } },
         dismissButton = { TextButton(onDismiss) { Text("Cancel") } })
     editing?.let { i ->
-        ColorPickerDialog("Colour for ${rateLabel(rates[i])}", colors[i], { editing = null }) { c ->
-            colors = colors.toMutableList().also { it[i] = c }; editing = null
+        ColorPickerDialog("Colour for ${rateLabel(rates[i])}", colors[i], { editing = null }) { color ->
+            colors = colors.toMutableList().also { it[i] = color }; editing = null
         }
     }
 }

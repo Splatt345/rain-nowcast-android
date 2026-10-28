@@ -27,6 +27,6 @@ class WarpTest {
         val rows = DoubleArray(w * h) { (h - 1 - it / w).toDouble() }; val cols = DoubleArray(w * h) { (it % w).toDouble() }
         val vx = Grid(h, w, DoubleArray(w * h) { 2.0 }); val vy = Grid(h, w, DoubleArray(w * h) { 1.0 })
         val m = Render.rasterMotion(Motion(vx, vy), Render.Sampler(rows, cols, w, h))
-        assertEquals(2f, m.dx[m.w + 1], 1e-6f); assertEquals(-1f, m.dy[m.w + 1], 1e-6f)
+        assertEquals(2f, m.dx[m.cols + 1], 1e-6f); assertEquals(-1f, m.dy[m.cols + 1], 1e-6f)
     }
 }

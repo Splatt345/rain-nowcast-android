@@ -40,82 +40,82 @@ private val DAY = DateTimeFormatter.ofPattern("EEE", Locale.ENGLISH)
 @Composable
 fun OutlookChart(bars: List<Bar?>, zone: ZoneId, selected: Int?, onSelect: (Int) -> Unit, modifier: Modifier = Modifier,
                  description: String) {
-    val cs = MaterialTheme.colorScheme
+    val colors = MaterialTheme.colorScheme
     val measurer = rememberTextMeasurer()
-    val label = MaterialTheme.typography.labelSmall.copy(color = cs.onSurfaceVariant)
+    val labelStyle = MaterialTheme.typography.labelSmall.copy(color = colors.onSurfaceVariant)
     val haptic = LocalHapticFeedback.current
     val yMax = remember(bars) { maxOf(1.0, bars.filterNotNull().maxOfOrNull { maxOf(it.p90, it.mm) } ?: 0.0) }
-    val hl = remember { Animatable(selected?.toFloat() ?: -1f) }
+    val highlight = remember { Animatable(selected?.toFloat() ?: -1f) }
     LaunchedEffect(selected) {
         if (selected == null) return@LaunchedEffect
-        if (hl.value < 0) hl.snapTo(selected.toFloat()) else hl.animateTo(selected.toFloat(), spring(stiffness = 900f))
+        if (highlight.value < 0) highlight.snapTo(selected.toFloat()) else highlight.animateTo(selected.toFloat(), spring(stiffness = 900f))
     }
-    val n = bars.size.coerceAtLeast(1)
+    val count = bars.size.coerceAtLeast(1)
 
     Canvas(
         modifier.fillMaxWidth().height(190.dp)
             .semantics { contentDescription = description }
             .pointerInput(bars) {
                 fun pick(x: Float) {
-                    val i = (x / size.width * n).toInt().coerceIn(0, n - 1)
-                    if (i != selected && bars.getOrNull(i) != null) { onSelect(i); haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove) }
+                    val index = (x / size.width * count).toInt().coerceIn(0, count - 1)
+                    if (index != selected && bars.getOrNull(index) != null) { onSelect(index); haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove) }
                 }
                 awaitEachGesture {
-                    val d = awaitFirstDown(); pick(d.position.x)
+                    val down = awaitFirstDown(); pick(down.position.x)
                     do {
-                        val e = awaitPointerEvent()
-                        e.changes.firstOrNull()?.let { c ->
-                            pick(c.position.x)
-                            if (abs(c.position.x - c.previousPosition.x) > abs(c.position.y - c.previousPosition.y)) c.consume()
+                        val event = awaitPointerEvent()
+                        event.changes.firstOrNull()?.let { change ->
+                            pick(change.position.x)
+                            if (abs(change.position.x - change.previousPosition.x) > abs(change.position.y - change.previousPosition.y)) change.consume()
                         }
-                    } while (e.changes.any { it.pressed })
+                    } while (event.changes.any { it.pressed })
                 }
             },
     ) {
         val top = 22.dp.toPx(); val bottom = size.height - 20.dp.toPx()
-        val slot = size.width / n
-        val bw = (slot * 0.72f).coerceAtLeast(1.5f)
+        val slot = size.width / count
+        val barWidth = (slot * 0.72f).coerceAtLeast(1.5f)
         fun y(mm: Double) = bottom - sqrt((mm / yMax).coerceIn(0.0, 1.0)).toFloat() * (bottom - top)
 
-        if (selected != null && hl.value >= 0)
-            drawRoundRect(cs.primary.copy(alpha = 0.12f), Offset(hl.value * slot - slot * 0.6f, top - 6.dp.toPx()),
+        if (selected != null && highlight.value >= 0)
+            drawRoundRect(colors.primary.copy(alpha = 0.12f), Offset(highlight.value * slot - slot * 0.6f, top - 6.dp.toPx()),
                 Size(slot * 2.2f, bottom - top + 6.dp.toPx()), CornerRadius(4.dp.toPx()))
 
-        drawLine(cs.outlineVariant, Offset(0f, bottom), Offset(size.width, bottom), 1f)
+        drawLine(colors.outlineVariant, Offset(0f, bottom), Offset(size.width, bottom), 1f)
         for (frac in listOf(0.25, 1.0)) {
-            val yy = y(yMax * frac)
-            drawLine(cs.outlineVariant.copy(alpha = 0.5f), Offset(0f, yy), Offset(size.width, yy), 1f,
+            val lineY = y(yMax * frac)
+            drawLine(colors.outlineVariant.copy(alpha = 0.5f), Offset(0f, lineY), Offset(size.width, lineY), 1f,
                 pathEffect = PathEffect.dashPathEffect(floatArrayOf(6f, 8f)))
         }
-        val maxLabel = measurer.measure("${fmt(yMax)} mm", label)
+        val maxLabel = measurer.measure("${formatRate(yMax)} mm", labelStyle)
         // under the line at the left edge: day labels own the row above, and no midnight divider is drawn at x = 0
         drawText(maxLabel, topLeft = Offset(0f, y(yMax) + 2.dp.toPx()))
 
-        bars.forEachIndexed { i, b ->
-            val cx = i * slot + slot / 2
-            if (b == null) {
-                drawCircle(cs.outlineVariant, 1.2.dp.toPx(), Offset(cx, bottom - 3.dp.toPx())); return@forEachIndexed
+        bars.forEachIndexed { i, bar ->
+            val centerX = i * slot + slot / 2
+            if (bar == null) {
+                drawCircle(colors.outlineVariant, 1.2.dp.toPx(), Offset(centerX, bottom - 3.dp.toPx())); return@forEachIndexed
             }
-            val t = b.start.atZone(zone)
-            if ((i == 0 && (t.hour < 20 || t.hour == 0)) || (t.hour == 0 && t.minute == 0)) {   // no first-day label crammed before midnight
-                if (i > 0) drawLine(cs.outline.copy(alpha = 0.6f), Offset(i * slot, top - 14.dp.toPx()), Offset(i * slot, bottom), 1.dp.toPx())
-                drawText(measurer, DAY.format(t), Offset(i * slot + (if (i > 0) 4.dp.toPx() else 0f), top - 20.dp.toPx()),
-                    label.copy(color = cs.onSurface))
+            val time = bar.start.atZone(zone)
+            if ((i == 0 && (time.hour < 20 || time.hour == 0)) || (time.hour == 0 && time.minute == 0)) {   // no first-day label crammed before midnight
+                if (i > 0) drawLine(colors.outline.copy(alpha = 0.6f), Offset(i * slot, top - 14.dp.toPx()), Offset(i * slot, bottom), 1.dp.toPx())
+                drawText(measurer, DAY.format(time), Offset(i * slot + (if (i > 0) 4.dp.toPx() else 0f), top - 20.dp.toPx()),
+                    labelStyle.copy(color = colors.onSurface))
             }
-            if (t.minute == 0 && t.hour % 6 == 0) {
-                val s = "%02d".format(t.hour)
-                val w = measurer.measure(s, label).size.width
-                drawText(measurer, s, Offset((i * slot - w / 2f).coerceAtLeast(0f), bottom + 5.dp.toPx()), label)
+            if (time.minute == 0 && time.hour % 6 == 0) {
+                val hourText = "%02d".format(time.hour)
+                val textWidth = measurer.measure(hourText, labelStyle).size.width
+                drawText(measurer, hourText, Offset((i * slot - textWidth / 2f).coerceAtLeast(0f), bottom + 5.dp.toPx()), labelStyle)
             }
-            val c = lerp(cs.surfaceVariant, cs.primary, (0.15 + 0.85 * b.probability).toFloat().coerceIn(0f, 1f))
+            val barColor = lerp(colors.surfaceVariant, colors.primary, (0.15 + 0.85 * bar.probability).toFloat().coerceIn(0f, 1f))
             // under 0.02 mm is dry for anyone standing in it: a hairline, not a bar
-            val h = if (b.mm < 0.02) 1.dp.toPx() else (bottom - y(b.mm)).coerceAtLeast(2.dp.toPx())
-            drawRoundRect(c, Offset(cx - bw / 2, bottom - h), Size(bw, h), CornerRadius(bw / 3))
+            val barHeight = if (bar.mm < 0.02) 1.dp.toPx() else (bottom - y(bar.mm)).coerceAtLeast(2.dp.toPx())
+            drawRoundRect(barColor, Offset(centerX - barWidth / 2, bottom - barHeight), Size(barWidth, barHeight), CornerRadius(barWidth / 3))
             // the 80% range only where it reaches wet (> 0.1 mm), or every dry half hour grows a whisker
-            if (b.p90 > b.p10 && b.p90 > OutlookBars.WET_MM)
-                drawLine(cs.onSurface.copy(alpha = 0.45f), Offset(cx, y(b.p90)), Offset(cx, y(b.p10)), 1.dp.toPx(), StrokeCap.Round)
-            if (b.source == BarSource.NOWCAST)      // radar-based half hours are underlined
-                drawRoundRect(cs.tertiary, Offset(i * slot + 0.5f, bottom + 1.dp.toPx()), Size(slot - 1f, 3.dp.toPx()), CornerRadius(2f))
+            if (bar.p90 > bar.p10 && bar.p90 > OutlookBars.WET_MM)
+                drawLine(colors.onSurface.copy(alpha = 0.45f), Offset(centerX, y(bar.p90)), Offset(centerX, y(bar.p10)), 1.dp.toPx(), StrokeCap.Round)
+            if (bar.source == BarSource.NOWCAST)      // radar-based half hours are underlined
+                drawRoundRect(colors.tertiary, Offset(i * slot + 0.5f, bottom + 1.dp.toPx()), Size(slot - 1f, 3.dp.toPx()), CornerRadius(2f))
         }
     }
 }

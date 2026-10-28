@@ -41,22 +41,22 @@ object Markdown {
         val lines = text.lines()
         var i = 0
         while (i < lines.size) {
-            val l = lines[i]
+            val line = lines[i]
             when {
-                l.isBlank() -> i++
-                l.startsWith("```") -> {
+                line.isBlank() -> i++
+                line.startsWith("```") -> {
                     val end = (i + 1 until lines.size).firstOrNull { lines[it].startsWith("```") } ?: lines.size
                     out += Block.Code(lines.subList(i + 1, end).joinToString("\n")); i = end + 1
                 }
-                l.startsWith("#") -> {
-                    val level = l.takeWhile { it == '#' }.length
-                    out += Block.Heading(level, l.drop(level).trim()); i++
+                line.startsWith("#") -> {
+                    val level = line.takeWhile { it == '#' }.length
+                    out += Block.Heading(level, line.drop(level).trim()); i++
                 }
-                l.startsWith("|") -> {
+                line.startsWith("|") -> {
                     val rows = lines.drop(i).takeWhile { it.startsWith("|") }
                     out += Block.Table(cells(rows[0]), rows.drop(2).map(::cells)); i += rows.size
                 }
-                l.startsWith("- ") -> {
+                line.startsWith("- ") -> {
                     val items = mutableListOf<String>()
                     while (i < lines.size && (lines[i].startsWith("- ") || lines[i].startsWith("  ") && items.isNotEmpty())) {
                         if (lines[i].startsWith("- ")) items += lines[i].drop(2).trim() else items[items.lastIndex] += " " + lines[i].trim()
@@ -77,20 +77,20 @@ object Markdown {
     private val INLINE = Regex("""\*\*(.+?)\*\*|`([^`]+)`|\[([^\]]+)]\(([^)]+)\)""")
 
     /** **bold**, `code` and [links](https://…); a relative link is shown as plain text. */
-    fun inline(s: String, code: SpanStyle, link: SpanStyle): AnnotatedString = buildAnnotatedString {
+    fun inline(text: String, code: SpanStyle, link: SpanStyle): AnnotatedString = buildAnnotatedString {
         var at = 0
-        for (m in INLINE.findAll(s)) {
-            append(s.substring(at, m.range.first))
-            val (bold, mono, label, url) = m.destructured
+        for (match in INLINE.findAll(text)) {
+            append(text.substring(at, match.range.first))
+            val (bold, mono, label, url) = match.destructured
             when {
                 bold.isNotEmpty() -> withStyle(SpanStyle(fontWeight = FontWeight.SemiBold)) { append(inline(bold, code, link)) }
                 mono.isNotEmpty() -> withStyle(code) { append(mono) }
                 url.startsWith("http") -> withLink(LinkAnnotation.Url(url, TextLinkStyles(link))) { append(label) }
                 else -> append(label)
             }
-            at = m.range.last + 1
+            at = match.range.last + 1
         }
-        append(s.substring(at))
+        append(text.substring(at))
     }
 }
 
@@ -99,40 +99,40 @@ object Markdown {
 fun GuideScreen(onBack: () -> Unit, modifier: Modifier = Modifier) {
     val ctx = LocalContext.current
     val blocks = remember { Markdown.parse(ctx.assets.open(GUIDE).bufferedReader().readText()) }
-    val cs = MaterialTheme.colorScheme
-    val code = SpanStyle(fontFamily = FontFamily.Monospace, background = cs.surfaceContainerHighest)
-    val link = SpanStyle(color = cs.primary, textDecoration = TextDecoration.Underline)
-    fun t(s: String) = Markdown.inline(s, code, link)
+    val scheme = MaterialTheme.colorScheme
+    val code = SpanStyle(fontFamily = FontFamily.Monospace, background = scheme.surfaceContainerHighest)
+    val link = SpanStyle(color = scheme.primary, textDecoration = TextDecoration.Underline)
+    fun styled(markdown: String) = Markdown.inline(markdown, code, link)
 
-    Scaffold(modifier, containerColor = cs.surface, contentWindowInsets = WindowInsets(0),
+    Scaffold(modifier, containerColor = scheme.surface, contentWindowInsets = WindowInsets(0),
         topBar = {
             TopAppBar({ Text("Your own region") }, windowInsets = WindowInsets(0),
                 navigationIcon = { IconButton(onBack) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "Back") } })
-        }) { pad ->
+        }) { innerPadding ->
         SelectionContainer {
-            LazyColumn(Modifier.padding(pad).fillMaxSize(), contentPadding = PaddingValues(16.dp, 8.dp, 16.dp, 48.dp),
+            LazyColumn(Modifier.padding(innerPadding).fillMaxSize(), contentPadding = PaddingValues(16.dp, 8.dp, 16.dp, 48.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                items(blocks.drop(1)) { b ->      // the first heading is the top bar
-                    when (b) {
-                        is Block.Heading -> Text(t(b.text), Modifier.padding(top = if (b.level <= 2) 14.dp else 6.dp).semantics { heading() },
-                            style = if (b.level <= 2) MaterialTheme.typography.titleLarge else MaterialTheme.typography.titleMedium)
-                        is Block.Para -> Text(t(b.text), style = MaterialTheme.typography.bodyMedium)
+                items(blocks.drop(1)) { block ->      // the first heading is the top bar
+                    when (block) {
+                        is Block.Heading -> Text(styled(block.text), Modifier.padding(top = if (block.level <= 2) 14.dp else 6.dp).semantics { heading() },
+                            style = if (block.level <= 2) MaterialTheme.typography.titleLarge else MaterialTheme.typography.titleMedium)
+                        is Block.Para -> Text(styled(block.text), style = MaterialTheme.typography.bodyMedium)
                         is Block.Bullets -> Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            b.items.forEach { Row { Text("•  "); Text(t(it), style = MaterialTheme.typography.bodyMedium) } }
+                            block.items.forEach { Row { Text("•  "); Text(styled(it), style = MaterialTheme.typography.bodyMedium) } }
                         }
-                        is Block.Code -> Text(b.text, Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
-                            .background(cs.surfaceContainerHighest).horizontalScroll(rememberScrollState()).padding(12.dp),
+                        is Block.Code -> Text(block.text, Modifier.fillMaxWidth().clip(RoundedCornerShape(12.dp))
+                            .background(scheme.surfaceContainerHighest).horizontalScroll(rememberScrollState()).padding(12.dp),
                             fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.bodySmall, softWrap = false)
                         // wide tables do not fit a phone: one card per row, "column: value"
                         is Block.Table -> Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            b.rows.forEach { row ->
-                                Card(colors = CardDefaults.cardColors(containerColor = cs.surfaceContainer)) {
+                            block.rows.forEach { row ->
+                                Card(colors = CardDefaults.cardColors(containerColor = scheme.surfaceContainer)) {
                                     Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                        Text(t(row.first()), style = MaterialTheme.typography.titleSmall)
-                                        b.header.drop(1).zip(row.drop(1)).filter { it.second.isNotEmpty() }.forEach { (h, v) ->
+                                        Text(styled(row.first()), style = MaterialTheme.typography.titleSmall)
+                                        block.header.drop(1).zip(row.drop(1)).filter { it.second.isNotEmpty() }.forEach { (column, value) ->
                                             Text(buildAnnotatedString {
-                                                withStyle(SpanStyle(color = cs.onSurfaceVariant)) { append("$h: ") }
-                                                append(t(v))
+                                                withStyle(SpanStyle(color = scheme.onSurfaceVariant)) { append("$column: ") }
+                                                append(styled(value))
                                             }, style = MaterialTheme.typography.bodySmall)
                                         }
                                     }

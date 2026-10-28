@@ -19,7 +19,7 @@ class SnapshotTest {
         assertEquals(s, Snapshot.read(tmp.root))
         assertFalse(File(tmp.root, "${Snapshot.FILE}.tmp").exists())
         val f = s.radar!!.frame(30)!!
-        assertEquals(s.radar!!.w * s.radar!!.h, f.bytes().size)
+        assertEquals(s.radar!!.width * s.radar!!.height, f.bytes().size)
         assertEquals(30, s.radar!!.frame(40)!!.lead)
     }
 
@@ -38,8 +38,8 @@ class SnapshotTest {
         File(tmp.root, Snapshot.FILE).writeText("{\"issued\": 1")
         assertNull(Snapshot.read(tmp.root))
         val s = Snapshot.sample(now)
-        assertNull(Snapshot.decode(Snapshot.encode(s.copy(prob = s.prob.drop(1)))))
-        assertNull(Snapshot.decode(Snapshot.encode(s.copy(v = 99))))
+        assertNull(Snapshot.decode(Snapshot.encode(s.copy(probability = s.probability.drop(1)))))
+        assertNull(Snapshot.decode(Snapshot.encode(s.copy(version = 99))))
         // a newer writer's extra fields do not break an older reader
         assertEquals(s, Snapshot.decode(Snapshot.encode(s).replaceFirst("{", "{\"future\":1,")))
     }
@@ -48,7 +48,7 @@ class SnapshotTest {
         val issued = now.epochSecond
         val s = Snapshot(issued = issued, written = issued, region = "Belgium", minutes = (0..60).toList(),
             mean = (0..60).map { if (it >= 30) 1f else 0f }, p10 = List(61) { 0f }, p90 = List(61) { 2f },
-            prob = (0..60).map { if (it >= 30) 0.8f else 0.1f })
+            probability = (0..60).map { if (it >= 30) 0.8f else 0.1f })
         assertTrue(s.summary(now).startsWith("Rain starting in 30 min (80% chance), up to 1"))
         assertTrue(s.summary(now.plusSeconds(600)).startsWith("Rain starting in 20 min"))
         assertEquals(80, s.chance(now.plusSeconds(600)))

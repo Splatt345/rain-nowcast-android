@@ -46,8 +46,8 @@ class RenderTest {
         val soft = Render.gaussian(blocky, Render.SMOOTH_PX)
         fun jump(g: Grid) = (0 until 64).maxOf { r -> (0 until 63).maxOf { c -> abs(g[r, c + 1] - g[r, c]) } }
         assertTrue(jump(soft) < jump(blocky))
-        assertEquals(blocky.v.average(), soft.v.average(), 0.05)
-        assertTrue(soft.v.all { it >= 0 })
+        assertEquals(blocky.values.average(), soft.values.average(), 0.05)
+        assertTrue(soft.values.all { it >= 0 })
     }
 
     @Test fun overlayIsClearWhereDryAndColouredWhereWet() {

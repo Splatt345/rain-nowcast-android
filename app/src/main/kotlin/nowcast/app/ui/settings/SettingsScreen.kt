@@ -58,11 +58,11 @@ fun SettingsScreen(repo: Repo, modifier: Modifier = Modifier) {
     var page by rememberSaveable { mutableStateOf("main") }      // main, regions or guide
     BackHandler(page != "main") { page = "main" }
     AnimatedContent(page, label = "settings", transitionSpec = {
-        val d = if (targetState != "main") 1 else -1
-        (slideInHorizontally(tween(260)) { it / 4 * d } + fadeIn(tween(200))) togetherWith
-            (slideOutHorizontally(tween(220)) { -it / 4 * d } + fadeOut(tween(150)))
-    }) { p ->
-        when (p) {
+        val direction = if (targetState != "main") 1 else -1
+        (slideInHorizontally(tween(260)) { it / 4 * direction } + fadeIn(tween(200))) togetherWith
+            (slideOutHorizontally(tween(220)) { -it / 4 * direction } + fadeOut(tween(150)))
+    }) { shown ->
+        when (shown) {
             "regions" -> RegionsScreen(repo, onBack = { page = "main" }, modifier)
             "guide" -> GuideScreen(onBack = { page = "main" }, modifier)
             else -> Main(repo, { page = "regions" }, { page = "guide" }, modifier)
@@ -72,19 +72,19 @@ fun SettingsScreen(repo: Repo, modifier: Modifier = Modifier) {
 
 @Composable
 private fun Main(repo: Repo, openRegions: () -> Unit, openGuide: () -> Unit, modifier: Modifier) {
-    val s by repo.prefs.settings.collectAsState()
+    val settings by repo.prefs.settings.collectAsState()
     val keys by repo.secrets.sources.collectAsState()
-    val list by repo.regionStore.regions.collectAsState()
+    val regions by repo.regionStore.regions.collectAsState()
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
     var licences by remember { mutableStateOf(false) }
     var editKey by remember { mutableStateOf<String?>(null) }      // the source whose key is being edited
     var locating by remember { mutableStateOf<String?>(null) }
 
-    fun update(f: (Settings) -> Settings) = repo.prefs.update(f)
+    fun update(transform: (Settings) -> Settings) = repo.prefs.update(transform)
     val locPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { ok ->
-        if (ok) { locating = "Locating…"; oneFix(ctx) { loc -> locating = if (loc == null) "No location fix" else null
-            loc?.let { scope.launch { repo.setHome(it.latitude, it.longitude, manual = false) } } } }
+        if (ok) { locating = "Locating…"; oneFix(ctx) { location -> locating = if (location == null) "No location fix" else null
+            location?.let { scope.launch { repo.setHome(it.latitude, it.longitude, manual = false) } } } }
         else locating = "Location permission denied"
     }
     // following: foreground permission first, then (Android 10+) "Allow all the time" for widgets and alerts
@@ -97,9 +97,9 @@ private fun Main(repo: Repo, openRegions: () -> Unit, openGuide: () -> Unit, mod
     var precise by remember { mutableStateOf(Locator.isPrecise(ctx)) }
     LifecycleResumeEffect(Unit) { precise = Locator.isPrecise(ctx); onPauseOrDispose { } }
     // precise and approximate in one request: Android shows the choice, either one is enough to follow
-    val followPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { r ->
+    val followPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { grants ->
         precise = Locator.isPrecise(ctx)
-        if (r.values.any { it }) { update { it.copy(followLocation = true) }; repo.kick(); if (!background) askBackground() }
+        if (grants.values.any { it }) { update { it.copy(followLocation = true) }; repo.kick(); if (!background) askBackground() }
         else locating = "Location permission denied"
     }
     if (whyBackground) AlertDialog({ whyBackground = false }, title = { Text("Follow you in the background?") },
@@ -118,9 +118,9 @@ private fun Main(repo: Repo, openRegions: () -> Unit, openGuide: () -> Unit, mod
 
         Section("Radar")
         Group {
-            Segmented("Next hour from", NowcastSource.entries, s.nowcastSource, { it.label }) { v ->
-                update { it.copy(nowcastSource = v) }; repo.kick(force = true) }
-            Text(if (s.nowcastSource == NowcastSource.RADAR)
+            Segmented("Next hour from", NowcastSource.entries, settings.nowcastSource, { it.label }) { source ->
+                update { it.copy(nowcastSource = source) }; repo.kick(force = true) }
+            Text(if (settings.nowcastSource == NowcastSource.RADAR)
                     "Observed radar (EUMETNET OPERA, Europe), moved forward by the nowcast. Needs a free MeteoGate key."
                 else "Open-Meteo's forecast models every 15 min, as a small ensemble: anywhere in the world, no key, " +
                     "free for non-commercial use. Model output, not observed rain: less sharp in the first hour than radar.",
@@ -129,68 +129,68 @@ private fun Main(repo: Repo, openRegions: () -> Unit, openGuide: () -> Unit, mod
             Item(Icons.Outlined.Key, "MeteoGate ORD key",
                 when {
                     Repo.SOURCE_OPERA in keys -> "Saved · tap to replace or remove"
-                    s.nowcastSource == NowcastSource.RADAR -> "Not set — the radar needs it"
+                    settings.nowcastSource == NowcastSource.RADAR -> "Not set — the radar needs it"
                     else -> "Not set — only the radar map needs it"
                 }) { editKey = Repo.SOURCE_OPERA }
-            if (s.nowcastSource == NowcastSource.OPEN_METEO) Item(Icons.Outlined.Key, "Open-Meteo API key (optional)",
+            if (settings.nowcastSource == NowcastSource.OPEN_METEO) Item(Icons.Outlined.Key, "Open-Meteo API key (optional)",
                 if (Repo.SOURCE_OPEN_METEO in keys) "Saved · requests go to the paid customer API"
                 else "Not needed for personal use; for commercial use or higher limits") { editKey = Repo.SOURCE_OPEN_METEO }
         }
 
         Section("Place")
         Group {
-            val (lat, lon) = s.home
+            val (lat, lon) = settings.home
             val where = "%.3f, %.3f".format(java.util.Locale.ROOT, lat, lon)
             Item(Icons.Outlined.Home, "Home", when {
-                s.followLocation -> "Your location · $where"
-                s.homeLat == null -> "Default (Brussels) · $where · tap a place on the map to change"
+                settings.followLocation -> "Your location · $where"
+                settings.homeLat == null -> "Default (Brussels) · $where · tap a place on the map to change"
                 else -> "$where · tap a place on the map to change"
             }, onClick = null)
             Toggle(Icons.Outlined.NearMe, "Follow my location", when {
-                !s.followLocation -> "Home moves with you"
+                !settings.followLocation -> "Home moves with you"
                 !precise -> "Approximate location: Android updates it every 10 min at most" +
                     if (background) "" else "; only while the app is open"
                 background -> "Live while the app is open, at each refresh in the background"
                 else -> "Live while the app is open; widgets and alerts use the last place"
-            }, s.followLocation) { on ->
+            }, settings.followLocation) { on ->
                 if (!on) update { it.copy(followLocation = false) }
                 else if (Locator.canLocate(ctx)) { update { it.copy(followLocation = true) }; repo.kick(); if (!background) askBackground() }
                 else followPermission.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
             }
-            if (s.followLocation && !background)
+            if (settings.followLocation && !background)
                 Item(Icons.Outlined.LocationOn, "Follow in the background too", "Allow location \"all the time\" so widgets and alerts move with you") {
                     askBackground()
                 }
-            if (!s.followLocation) Item(Icons.Outlined.MyLocation, "Use my location once", locating ?: "One fix now, not tracked") {
+            if (!settings.followLocation) Item(Icons.Outlined.MyLocation, "Use my location once", locating ?: "One fix now, not tracked") {
                 locPermission.launch(Manifest.permission.ACCESS_COARSE_LOCATION)
             }
             var regionMenu by remember { mutableStateOf(false) }
             Box {
-                Item(Icons.Outlined.Public, "Region", s.regionId?.let { id -> list.firstOrNull { it.id == id }?.name ?: id }
+                Item(Icons.Outlined.Public, "Region", settings.regionId?.let { id -> regions.firstOrNull { it.id == id }?.name ?: id }
                     ?: "Automatic (the one containing home)") { regionMenu = true }
                 DropdownMenu(regionMenu, { regionMenu = false }) {
                     DropdownMenuItem({ Text("Automatic") }, { update { it.copy(regionId = null) }; regionMenu = false })
-                    list.forEach { r -> DropdownMenuItem({ Text(r.name) }, { update { it.copy(regionId = r.id) }; regionMenu = false }) }
+                    regions.forEach { region -> DropdownMenuItem({ Text(region.name) }, { update { it.copy(regionId = region.id) }; regionMenu = false }) }
                 }
             }
-            Item(Icons.Outlined.Layers, "Regions and models", "${list.size} regions · add, edit, upload a model", onClick = openRegions)
+            Item(Icons.Outlined.Layers, "Regions and models", "${regions.size} regions · add, edit, upload a model", onClick = openRegions)
             Item(Icons.Outlined.School, "Your own region", "Use the app outside Belgium, or train a model for it",
                 onClick = openGuide)
         }
 
         Section("Forecast")
         Group {
-            Toggle(Icons.Outlined.Psychology, "Use the ML model", "SmaAt-UNet shifts the ensemble toward its forecast", s.useModel) { v ->
-                update { it.copy(useModel = v) }; repo.kick(force = true)
+            Toggle(Icons.Outlined.Psychology, "Use the ML model", "SmaAt-UNet shifts the ensemble toward its forecast", settings.useModel) { enabled ->
+                update { it.copy(useModel = enabled) }; repo.kick(force = true)
             }
         }
 
         Section("Background")
         Group {
             Toggle(Icons.Outlined.Sync, "Background updates",
-                if (s.background) "Every 15 min on any network: a small radar crop around home, for widgets and alerts"
-                else "Off: nothing is downloaded unless the app is open or you tap a widget's refresh button", s.background) { v ->
-                update { it.copy(background = v) }; RefreshWorker.schedule(ctx, v)
+                if (settings.background) "Every 15 min on any network: a small radar crop around home, for widgets and alerts"
+                else "Off: nothing is downloaded unless the app is open or you tap a widget's refresh button", settings.background) { enabled ->
+                update { it.copy(background = enabled) }; RefreshWorker.schedule(ctx, enabled)
             }
         }
 
@@ -200,15 +200,15 @@ private fun Main(repo: Repo, openRegions: () -> Unit, openGuide: () -> Unit, mod
             var radar by remember { mutableStateOf(false) }
             var radarMenu by remember { mutableStateOf(false) }
             val choices = AppColors.entries.filter { it != AppColors.WALLPAPER || Build.VERSION.SDK_INT >= Build.VERSION_CODES.S }
-            Segmented("App colours", choices, s.appColors.takeIf { it in choices } ?: AppColors.RAIN, { it.label }) { c ->
-                repo.updateLook { it.copy(appColors = c) } }
-            if (s.appColors == AppColors.CUSTOM)
-                Item(Icons.Outlined.Palette, "Accent colour", "#${Settings.hex(s.accent)} · tap to change",
-                    Brush.linearGradient(listOf(rgb(s.accent), rgb(s.accent)))) { accent = true }
-            Segmented("Dark mode", DarkMode.entries, s.darkMode, { it.label }) { m -> update { it.copy(darkMode = m) } }
+            Segmented("App colours", choices, settings.appColors.takeIf { it in choices } ?: AppColors.RAIN, { it.label }) { choice ->
+                repo.updateLook { it.copy(appColors = choice) } }
+            if (settings.appColors == AppColors.CUSTOM)
+                Item(Icons.Outlined.Palette, "Accent colour", "#${Settings.hex(settings.accent)} · tap to change",
+                    Brush.linearGradient(listOf(rgb(settings.accent), rgb(settings.accent)))) { accent = true }
+            Segmented("Dark mode", DarkMode.entries, settings.darkMode, { it.label }) { mode -> update { it.copy(darkMode = mode) } }
             Box {
-                val lut = remember(s.palette, s.radarColors) { s.radarLut() }
-                Item(Icons.Outlined.Gradient, "Radar colours", s.palette.replaceFirstChar { it.uppercase() },
+                val lut = remember(settings.palette, settings.radarColors) { settings.radarLut() }
+                Item(Icons.Outlined.Gradient, "Radar colours", settings.palette.replaceFirstChar { it.uppercase() },
                     Brush.horizontalGradient(listOf(30, 120, 200, 250).map { rgb(lut[it]) })) { radarMenu = true }
                 DropdownMenu(radarMenu, { radarMenu = false }) {
                     Render.PALETTES.keys.forEach { name ->
@@ -218,23 +218,23 @@ private fun Main(repo: Repo, openRegions: () -> Unit, openGuide: () -> Unit, mod
                     DropdownMenuItem({ Text("Custom…") }, { radarMenu = false; radar = true })
                 }
             }
-            if (accent) ColorPickerDialog("Accent colour", s.accent, { accent = false }) { c ->
-                repo.updateLook { it.copy(accent = c) }; accent = false }
-            if (radar) RadarColorsDialog(s.radarColors, { radar = false }) { c ->
-                repo.updateLook { it.copy(palette = Render.CUSTOM, radarColors = c) }; radar = false }
+            if (accent) ColorPickerDialog("Accent colour", settings.accent, { accent = false }) { color ->
+                repo.updateLook { it.copy(accent = color) }; accent = false }
+            if (radar) RadarColorsDialog(settings.radarColors, { radar = false }) { chosen ->
+                repo.updateLook { it.copy(palette = Render.CUSTOM, radarColors = chosen) }; radar = false }
         }
 
         Section("Rain alerts")
         Group {
             Toggle(Icons.Outlined.NotificationsActive, "Notify before rain",
-                if (s.background) "\"Rain in N min\" at home" else "Needs background updates", s.notify) { v -> update { it.copy(notify = v) } }
-            SliderItem("Warn up to", "${s.notifyLeadMin} min ahead", s.notifyLeadMin.toFloat(),
-                Settings.LEAD_RANGE.first.toFloat()..Settings.LEAD_RANGE.last.toFloat(), 10, s.notify) { v ->
-                update { it.copy(notifyLeadMin = (v / 5).roundToInt() * 5) } }
-            SliderItem("When the chance is at least", "${(s.notifyThreshold * 100).roundToInt()}%", s.notifyThreshold.toFloat(),
-                0.1f..0.9f, 7, s.notify) { v -> update { it.copy(notifyThreshold = (v * 10).roundToInt() / 10.0) } }
+                if (settings.background) "\"Rain in N min\" at home" else "Needs background updates", settings.notify) { enabled -> update { it.copy(notify = enabled) } }
+            SliderItem("Warn up to", "${settings.notifyLeadMin} min ahead", settings.notifyLeadMin.toFloat(),
+                Settings.LEAD_RANGE.first.toFloat()..Settings.LEAD_RANGE.last.toFloat(), 10, settings.notify) { minutes ->
+                update { it.copy(notifyLeadMin = (minutes / 5).roundToInt() * 5) } }
+            SliderItem("When the chance is at least", "${(settings.notifyThreshold * 100).roundToInt()}%", settings.notifyThreshold.toFloat(),
+                0.1f..0.9f, 7, settings.notify) { threshold -> update { it.copy(notifyThreshold = (threshold * 10).roundToInt() / 10.0) } }
         }
-        Text("Radar: EUMETNET OPERA via MeteoGate · Outlook" + (if (s.nowcastSource == NowcastSource.OPEN_METEO) " and nowcast" else "") +
+        Text("Radar: EUMETNET OPERA via MeteoGate · Outlook" + (if (settings.nowcastSource == NowcastSource.OPEN_METEO) " and nowcast" else "") +
             ": Open-Meteo (weather data by Open-Meteo.com, CC BY 4.0) · Map: OpenFreeMap © OpenMapTiles, data © OpenStreetMap contributors",
             style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(start = 4.dp, top = 20.dp))
@@ -250,32 +250,32 @@ private fun Main(repo: Repo, openRegions: () -> Unit, openGuide: () -> Unit, mod
             text = { Text(text, Modifier.verticalScroll(rememberScrollState()), style = MaterialTheme.typography.bodySmall) })
     }
 
-    editKey?.let { src ->
-        KeyDialog(if (src == Repo.SOURCE_OPERA) "ORD API key" else "Open-Meteo API key", onDismiss = { editKey = null }, onSave = { k ->
-            repo.secrets.set(src, k); editKey = null; repo.kick(force = true)
-        }, onRemove = { repo.secrets.set(src, null); editKey = null; repo.kick(force = true) })
+    editKey?.let { source ->
+        KeyDialog(if (source == Repo.SOURCE_OPERA) "ORD API key" else "Open-Meteo API key", onDismiss = { editKey = null }, onSave = { key ->
+            repo.secrets.set(source, key); editKey = null; repo.kick(force = true)
+        }, onRemove = { repo.secrets.set(source, null); editKey = null; repo.kick(force = true) })
     }
 }
 
 @SuppressLint("MissingPermission")
 private fun oneFix(ctx: Context, done: (Location?) -> Unit) {
     if (ctx.checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED) return done(null)
-    val lm = ctx.getSystemService(LocationManager::class.java)
-    val provider = listOf(LocationManager.NETWORK_PROVIDER, LocationManager.GPS_PROVIDER).firstOrNull { lm.isProviderEnabled(it) }
+    val locationManager = ctx.getSystemService(LocationManager::class.java)
+    val provider = listOf(LocationManager.NETWORK_PROVIDER, LocationManager.GPS_PROVIDER).firstOrNull { locationManager.isProviderEnabled(it) }
         ?: return done(null)
-    if (Build.VERSION.SDK_INT >= 30) lm.getCurrentLocation(provider, null, ctx.mainExecutor) { done(it ?: lm.getLastKnownLocation(provider)) }
-    else @Suppress("DEPRECATION") lm.requestSingleUpdate(provider, { done(it) }, ctx.mainLooper)
+    if (Build.VERSION.SDK_INT >= 30) locationManager.getCurrentLocation(provider, null, ctx.mainExecutor) { done(it ?: locationManager.getLastKnownLocation(provider)) }
+    else @Suppress("DEPRECATION") locationManager.requestSingleUpdate(provider, { done(it) }, ctx.mainLooper)
 }
 
 @Composable
 private fun KeyDialog(title: String, onDismiss: () -> Unit, onSave: (String) -> Unit, onRemove: () -> Unit) {
-    var k by remember { mutableStateOf("") }
+    var key by remember { mutableStateOf("") }
     AlertDialog(onDismiss, title = { Text(title) },
         text = {
-            OutlinedTextField(k, { k = it.trim() }, singleLine = true, label = { Text("New key") },
+            OutlinedTextField(key, { key = it.trim() }, singleLine = true, label = { Text("New key") },
                 visualTransformation = PasswordVisualTransformation(), modifier = Modifier.fillMaxWidth())
         },
-        confirmButton = { TextButton({ onSave(k) }, enabled = k.isNotBlank()) { Text("Save") } },
+        confirmButton = { TextButton({ onSave(key) }, enabled = key.isNotBlank()) { Text("Save") } },
         dismissButton = { Row { TextButton(onRemove) { Text("Remove key") }; TextButton(onDismiss) { Text("Cancel") } } })
 }
 
@@ -290,15 +290,15 @@ fun Group(content: @Composable ColumnScope.() -> Unit) =
         Column(Modifier.fillMaxWidth().padding(vertical = 4.dp), content = content)
     }
 
-private fun rgb(c: Int) = Color(0xFF000000.toInt() or c)
+private fun rgb(color: Int) = Color(0xFF000000.toInt() or color)
 
 @Composable
-private fun <T> Segmented(title: String, items: List<T>, sel: T, label: (T) -> String, onPick: (T) -> Unit) {
+private fun <T> Segmented(title: String, items: List<T>, selected: T, label: (T) -> String, onPick: (T) -> Unit) {
     Column(Modifier.padding(start = 56.dp, end = 16.dp, top = 10.dp, bottom = 6.dp)) {
         Text(title, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.padding(bottom = 6.dp))
         SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-            items.forEachIndexed { i, it ->
-                SegmentedButton(it == sel, { onPick(it) }, SegmentedButtonDefaults.itemShape(i, items.size)) {
+            items.forEachIndexed { index, it ->
+                SegmentedButton(it == selected, { onPick(it) }, SegmentedButtonDefaults.itemShape(index, items.size)) {
                     Text(label(it), maxLines = 1, style = MaterialTheme.typography.labelMedium)
                 }
             }
@@ -336,13 +336,13 @@ private fun Toggle(icon: ImageVector, title: String, sub: String, on: Boolean, s
 }
 
 @Composable
-private fun SliderItem(title: String, value: String, v: Float, range: ClosedFloatingPointRange<Float>, steps: Int, enabled: Boolean,
+private fun SliderItem(title: String, value: String, position: Float, range: ClosedFloatingPointRange<Float>, steps: Int, enabled: Boolean,
                        set: (Float) -> Unit) {
     Column(Modifier.padding(start = 56.dp, end = 16.dp, top = 6.dp, bottom = 2.dp)) {
         Row {
             Text(title, style = MaterialTheme.typography.bodyLarge, modifier = Modifier.weight(1f))
             Text(value, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
         }
-        Slider(v, set, valueRange = range, steps = steps, enabled = enabled)
+        Slider(position, set, valueRange = range, steps = steps, enabled = enabled)
     }
 }

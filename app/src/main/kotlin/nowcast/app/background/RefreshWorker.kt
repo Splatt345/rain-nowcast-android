@@ -23,11 +23,11 @@ class RefreshWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ct
         val repo = (applicationContext as App).repo
         if (!repo.canRun) return Result.success()
         // the full ensemble runs only while the app is visible; here, the cheap point path
-        val (p, issued) = repo.refreshPoint() ?: return Result.success()
-        val s = repo.prefs.value
-        if (s.notify)
-            Notifier.maybeAlert(applicationContext, p.summary,
-                Alerts.minutesToRain(p, issued, Instant.now(), s.notifyLeadMin, s.notifyThreshold))
+        val (forecast, issued) = repo.refreshPoint() ?: return Result.success()
+        val settings = repo.prefs.value
+        if (settings.notify)
+            Notifier.maybeAlert(applicationContext, forecast.summary,
+                Alerts.minutesToRain(forecast, issued, Instant.now(), settings.notifyLeadMin, settings.notifyThreshold))
         return Result.success()
     }
 
@@ -41,10 +41,10 @@ class RefreshWorker(ctx: Context, params: WorkerParameters) : CoroutineWorker(ct
                     .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
                     .build())
         }
-        fun schedule(ctx: Context, on: Boolean) {
-            val wm = WorkManager.getInstance(ctx)
-            if (!on) { wm.cancelUniqueWork(NAME); return }
-            wm.enqueueUniquePeriodicWork(NAME, ExistingPeriodicWorkPolicy.UPDATE,
+        fun schedule(ctx: Context, enabled: Boolean) {
+            val workManager = WorkManager.getInstance(ctx)
+            if (!enabled) { workManager.cancelUniqueWork(NAME); return }
+            workManager.enqueueUniquePeriodicWork(NAME, ExistingPeriodicWorkPolicy.UPDATE,
                 PeriodicWorkRequestBuilder<RefreshWorker>(15, TimeUnit.MINUTES)
                     .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
                     .build())
@@ -65,19 +65,19 @@ object Notifier {
 
     fun maybeAlert(ctx: Context, summary: String, minutes: Int?) {
         if (minutes == null) return
-        val sp = ctx.getSharedPreferences("alerts", Context.MODE_PRIVATE)
-        val last = sp.getLong("last", 0L)
+        val prefs = ctx.getSharedPreferences("alerts", Context.MODE_PRIVATE)
+        val last = prefs.getLong("last", 0L)
         if (System.currentTimeMillis() - last < QUIET_MIN * 60_000) return
         if (Build.VERSION.SDK_INT >= 33 &&
             ctx.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) return
         val open = PendingIntent.getActivity(ctx, 0, Intent(ctx, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE)
-        val n = NotificationCompat.Builder(ctx, CHANNEL)
+        val notification = NotificationCompat.Builder(ctx, CHANNEL)
             .setSmallIcon(R.drawable.ic_drop)
             .setContentTitle(if (minutes <= 1) "Rain any minute" else "Rain in $minutes min")
             .setContentText(summary)
             .setContentIntent(open).setAutoCancel(true)
             .build()
-        NotificationManagerCompat.from(ctx).notify(1, n)
-        sp.edit().putLong("last", System.currentTimeMillis()).apply()
+        NotificationManagerCompat.from(ctx).notify(1, notification)
+        prefs.edit().putLong("last", System.currentTimeMillis()).apply()
     }
 }

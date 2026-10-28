@@ -35,7 +35,7 @@ class CacheTest {
         MapFrames.write(tmp.root, f)
         val g = MapFrames.read(tmp.root)!!
         assertArrayEquals(f.levels[0], g.levels[0]); assertEquals(f.times, g.times); assertEquals(f.bbox, g.bbox)
-        assertEquals("belgium", g.regionId); assertEquals(t, g.issued); assertEquals(3, g.w)
+        assertEquals("belgium", g.regionId); assertEquals(t, g.issued); assertEquals(3, g.width)
         assertArrayEquals(f.motion.dx, g.motion.dx, 0f)
 
         assertEquals(5, g.minutes)

@@ -33,7 +33,7 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 import kotlin.math.roundToInt
 
-val HM: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
+val TIME_FORMAT: DateTimeFormatter = DateTimeFormatter.ofPattern("HH:mm")
 const val STALE_MIN = 15
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -48,55 +48,55 @@ fun NowScreen(state: UiState, now: Instant, view: NowView, onView: (NowView) -> 
                 .padding(horizontal = 20.dp).padding(top = 12.dp, bottom = 24.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp),
         ) {
-            val p = state.point
+            val point = state.point
             val issued = state.issued
             val age = issued?.let { Duration.between(it, now).toMinutes().toInt() }
-            val src = if (state.modelOnly) "Open-Meteo" else "radar"
-            Header(state.forecast?.region?.name.takeIf { !state.modelOnly } ?: state.regionName, age, state.loading, src)
+            val source = if (state.modelOnly) "Open-Meteo" else "radar"
+            Header(state.forecast?.region?.name.takeIf { !state.modelOnly } ?: state.regionName, age, state.loading, source)
 
             when {
                 state.problem == Problem.NoKey -> ProblemCard(Icons.Outlined.Key, "Radar key needed",
                     "Add your MeteoGate ORD API key in Settings to load the radar, or use Open-Meteo's forecast " +
                         "models instead: free, no key, anywhere in the world, but model output rather than radar.",
                     "Open settings", onOpenSettings, "Use Open-Meteo", onUseOpenMeteo)
-                p == null && state.problem is Problem.Outside -> ProblemCard(Icons.Outlined.Public,
+                point == null && state.problem is Problem.Outside -> ProblemCard(Icons.Outlined.Public,
                     "Home is outside ${state.problem.region}", problemText(state.problem), "Open settings", onOpenSettings)
-                p == null && state.problem != null -> ProblemCard(Icons.Outlined.CloudOff, "No forecast yet",
+                point == null && state.problem != null -> ProblemCard(Icons.Outlined.CloudOff, "No forecast yet",
                     problemText(state.problem), "Try again", onRefresh)
-                p == null || issued == null -> Skeleton()
+                point == null || issued == null -> Skeleton()
                 else -> {
                     val stale = (age ?: 0) > STALE_MIN
-                    val from = "${src.replaceFirstChar { it.uppercase() }} from ${HM.format(issued.atZone(zone))}"
-                    Text(if (stale) "$from: ${p.summary.replaceFirstChar { it.lowercase() }}" else p.summary,
+                    val from = "${source.replaceFirstChar { it.uppercase() }} from ${TIME_FORMAT.format(issued.atZone(zone))}"
+                    Text(if (stale) "$from: ${point.summary.replaceFirstChar { it.lowercase() }}" else point.summary,
                         style = MaterialTheme.typography.headlineSmall, modifier = Modifier.semantics { heading() })
-                    Stats(p, age ?: 0)
+                    Stats(point, age ?: 0)
                     if (state.problem != null) Banner(Icons.Outlined.CloudOff,
                         "${problemText(state.problem)} — showing ${from.replaceFirstChar { it.lowercase() }}", warn = true)
                     else if (stale) Banner(Icons.Outlined.Schedule,
-                        "${src.replaceFirstChar { it.uppercase() }} is $age min old; the next refresh will catch up", warn = true)
+                        "${source.replaceFirstChar { it.uppercase() }} is $age min old; the next refresh will catch up", warn = true)
                     if (state.modelOnly) Banner(Icons.Outlined.Info,
                         "Open-Meteo forecast models, not radar: rain that is already falling may be missed or misplaced", warn = false)
-                    if (!p.inCoverage) Banner(Icons.Outlined.WrongLocation, "Home is outside the radar crop; showing its nearest edge", warn = true)
+                    if (!point.inCoverage) Banner(Icons.Outlined.WrongLocation, "Home is outside the radar crop; showing its nearest edge", warn = true)
                 }
             }
 
-            if (p != null || state.outlook != null) {
+            if (point != null || state.outlook != null) {
                 SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-                    NowView.entries.forEachIndexed { i, v ->
-                        SegmentedButton(selected = view == v, onClick = { onView(v) },
-                            shape = SegmentedButtonDefaults.itemShape(i, NowView.entries.size),
-                            icon = { SegmentedButtonDefaults.Icon(view == v) },
+                    NowView.entries.forEachIndexed { index, option ->
+                        SegmentedButton(selected = view == option, onClick = { onView(option) },
+                            shape = SegmentedButtonDefaults.itemShape(index, NowView.entries.size),
+                            icon = { SegmentedButtonDefaults.Icon(view == option) },
                             modifier = Modifier.heightIn(min = 48.dp)) {
-                            Text(if (v == NowView.NOWCAST) "Nowcast" else "Next 48 h")
+                            Text(if (option == NowView.NOWCAST) "Nowcast" else "Next 48 h")
                         }
                     }
                 }
                 AnimatedContent(view, label = "view", transitionSpec = {
-                    val dir = if (targetState.ordinal > initialState.ordinal) 1 else -1
-                    (fadeIn(tween(220, 60)) + slideInHorizontally(tween(260)) { it / 6 * dir }) togetherWith
-                        (fadeOut(tween(120)) + slideOutHorizontally(tween(200)) { -it / 6 * dir }) using SizeTransform(clip = false)
-                }) { v ->
-                    if (v == NowView.NOWCAST) NowcastCard(state, now)
+                    val direction = if (targetState.ordinal > initialState.ordinal) 1 else -1
+                    (fadeIn(tween(220, 60)) + slideInHorizontally(tween(260)) { it / 6 * direction }) togetherWith
+                        (fadeOut(tween(120)) + slideOutHorizontally(tween(200)) { -it / 6 * direction }) using SizeTransform(clip = false)
+                }) { shown ->
+                    if (shown == NowView.NOWCAST) NowcastCard(state, now)
                     else OutlookCard(state, now, zone)
                 }
             }
@@ -114,11 +114,11 @@ private fun Header(region: String?, age: Int?, loading: Boolean, source: String)
         }
         if (age != null) {
             val stale = age > STALE_MIN
-            val bg = if (stale) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.secondaryContainer
-            val fg = if (stale) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onSecondaryContainer
-            Surface(color = bg, contentColor = fg, shape = RoundedCornerShape(50)) {
+            val chipColor = if (stale) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.secondaryContainer
+            val textColor = if (stale) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onSecondaryContainer
+            Surface(color = chipColor, contentColor = textColor, shape = RoundedCornerShape(50)) {
                 Row(Modifier.padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-                    if (loading) CircularProgressIndicator(Modifier.size(12.dp), strokeWidth = 2.dp, color = fg)
+                    if (loading) CircularProgressIndicator(Modifier.size(12.dp), strokeWidth = 2.dp, color = textColor)
                     else Icon(Icons.Outlined.Radar, null, Modifier.size(14.dp))
                     Spacer(Modifier.width(6.dp))
                     Text(if (age <= 0) "$source now" else "$source $age min old", style = MaterialTheme.typography.labelMedium)
@@ -129,24 +129,24 @@ private fun Header(region: String?, age: Int?, loading: Boolean, source: String)
 }
 
 @Composable
-private fun Stats(p: PointForecast, age: Int) {
-    val i = p.minutes.indexOfFirst { it >= age }.let { if (it < 0) p.minutes.lastIndex else it }    // past the series: its end, not the radar an hour back
-    val rate = p.values[i]
+private fun Stats(point: PointForecast, age: Int) {
+    val start = point.minutes.indexOfFirst { it >= age }.let { if (it < 0) point.minutes.lastIndex else it }    // past the series: its end, not the radar an hour back
+    val rate = point.values[start]
     Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
         // counted from now, like the summary sentence (rainChance starts at the radar frame)
-        val chance = p.probability.copyOfRange(i, p.probability.size).max()
+        val chance = point.probability.copyOfRange(start, point.probability.size).max()
         Tile("Chance", "${(100 * chance).roundToInt()}", "%", "next hour", Modifier.weight(1.2f), highlight = true)
-        Tile("Now", if (rate > 0.0 && rate < RAIN_THRESHOLD) "<0.1" else fmt(rate), "mm/h", if (rate >= RAIN_THRESHOLD) "raining" else "dry", Modifier.weight(1f))
-        Tile("Peak", fmt(p.values.copyOfRange(i, p.values.size).max()), "mm/h", "in the hour", Modifier.weight(1f))
+        Tile("Now", if (rate > 0.0 && rate < RAIN_THRESHOLD) "<0.1" else formatRate(rate), "mm/h", if (rate >= RAIN_THRESHOLD) "raining" else "dry", Modifier.weight(1f))
+        Tile("Peak", formatRate(point.values.copyOfRange(start, point.values.size).max()), "mm/h", "in the hour", Modifier.weight(1f))
     }
 }
 
 @Composable
-private fun Tile(title: String, value: String, unit: String, sub: String, modifier: Modifier, highlight: Boolean = false) {
-    val cs = MaterialTheme.colorScheme
+private fun Tile(title: String, value: String, unit: String, caption: String, modifier: Modifier, highlight: Boolean = false) {
+    val colors = MaterialTheme.colorScheme
     Surface(modifier.fillMaxHeight(), shape = RoundedCornerShape(20.dp),
-        color = if (highlight) cs.primaryContainer else cs.surfaceContainerHigh,
-        contentColor = if (highlight) cs.onPrimaryContainer else cs.onSurface) {
+        color = if (highlight) colors.primaryContainer else colors.surfaceContainerHigh,
+        contentColor = if (highlight) colors.onPrimaryContainer else colors.onSurface) {
         Column(Modifier.padding(14.dp)) {
             Text(title.uppercase(), style = Overline, color = LocalContentColor.current.copy(alpha = 0.75f))
             Row(verticalAlignment = Alignment.Bottom) {
@@ -154,18 +154,18 @@ private fun Tile(title: String, value: String, unit: String, sub: String, modifi
                 Spacer(Modifier.width(3.dp))
                 Text(unit, style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(bottom = 6.dp))
             }
-            Text(sub, style = MaterialTheme.typography.labelSmall, color = LocalContentColor.current.copy(alpha = 0.7f))
+            Text(caption, style = MaterialTheme.typography.labelSmall, color = LocalContentColor.current.copy(alpha = 0.7f))
         }
     }
 }
 
 @Composable
 private fun NowcastCard(state: UiState, now: Instant) {
-    val p = state.point; val issued = state.issued
+    val point = state.point; val issued = state.issued
     ElevatedCard(Modifier.fillMaxWidth(), shape = RoundedCornerShape(24.dp),
         colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)) {
         Column(Modifier.padding(start = 8.dp, end = 12.dp, top = 16.dp, bottom = 14.dp)) {
-            if (p != null && issued != null) NowcastGraph(p, issued, now)
+            if (point != null && issued != null) NowcastGraph(point, issued, now)
             else Box(Modifier.fillMaxWidth().height(240.dp)) { Shimmer(Modifier.matchParentSize()) }
         }
     }
@@ -176,26 +176,26 @@ private fun OutlookCard(state: UiState, now: Instant, zone: ZoneId) {
     val bars = remember(state.outlook, state.point, now.epochSecond / 60) {
         OutlookBars.join(state.outlook, state.point, state.issued, now)
     }
-    var sel by rememberSaveable(state.outlook) { mutableStateOf<Int?>(null) }
+    var selected by rememberSaveable(state.outlook) { mutableStateOf<Int?>(null) }
     ElevatedCard(Modifier.fillMaxWidth(), shape = RoundedCornerShape(24.dp),
         colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)) {
         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             val sentence = OutlookBars.sentence(bars, zone)
             if (bars.all { it == null }) {
-                val o = state.outlook
-                Text(if (state.outlookError != null) "Outlook unavailable" + (o?.let { ", last fetched ${HM.format(it.fetched.atZone(zone))}" } ?: "")
+                val outlook = state.outlook
+                Text(if (state.outlookError != null) "Outlook unavailable" + (outlook?.let { ", last fetched ${TIME_FORMAT.format(it.fetched.atZone(zone))}" } ?: "")
                     else "Loading the outlook…", style = MaterialTheme.typography.titleMedium)
                 if (state.outlookError == null) Shimmer(Modifier.fillMaxWidth().height(190.dp))
                 return@Column
             }
             Text(sentence, style = MaterialTheme.typography.titleMedium)
-            val label = sel?.let { bars.getOrNull(it) }?.let { OutlookBars.label(it, zone) }
-            AnimatedContent(label, label = "barLabel", transitionSpec = { fadeIn(tween(150)) togetherWith fadeOut(tween(90)) }) { l ->
-                Text(l ?: "Tap a bar for its half hour", style = MaterialTheme.typography.labelLarge,
-                    color = if (l == null) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.primary,
+            val label = selected?.let { bars.getOrNull(it) }?.let { OutlookBars.label(it, zone) }
+            AnimatedContent(label, label = "barLabel", transitionSpec = { fadeIn(tween(150)) togetherWith fadeOut(tween(90)) }) { text ->
+                Text(text ?: "Tap a bar for its half hour", style = MaterialTheme.typography.labelLarge,
+                    color = if (text == null) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.primary,
                     maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
-            OutlookChart(bars, zone, sel, { sel = it }, description = sentence)
+            OutlookChart(bars, zone, selected, { selected = it }, description = sentence)
             Row(horizontalArrangement = Arrangement.spacedBy(14.dp), verticalAlignment = Alignment.CenterVertically) {
                 ProbScale()
                 Box(Modifier.size(14.dp, 3.dp).clip(RoundedCornerShape(2.dp)).background(MaterialTheme.colorScheme.tertiary))
@@ -204,37 +204,37 @@ private fun OutlookCard(state: UiState, now: Instant, zone: ZoneId) {
                 Text("line = 80% range", style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            val o = state.outlook
+            val outlook = state.outlook
             val first = if (state.modelOnly) "First hour from Open-Meteo's 15-minute models" else "First hour from radar"
-            val src = when {
-                o == null -> ""
-                o.usedModel -> "$first, then the local model on " +
-                    o.meta.modelNames.let { n -> if (n.size > 1) n.dropLast(1).joinToString(", ") + " and " + n.last() else n.joinToString() }
-                else -> "$first, then ${o.meta.ensembleName}"
+            val source = when {
+                outlook == null -> ""
+                outlook.usedModel -> "$first, then the local model on " +
+                    outlook.meta.modelNames.let { names -> if (names.size > 1) names.dropLast(1).joinToString(", ") + " and " + names.last() else names.joinToString() }
+                else -> "$first, then ${outlook.meta.ensembleName}"
             }
-            if (src.isNotEmpty()) Text(src + " · fetched ${HM.format(o!!.fetched.atZone(zone))}",
+            if (source.isNotEmpty()) Text(source + " · fetched ${TIME_FORMAT.format(outlook!!.fetched.atZone(zone))}",
                 style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            o?.note?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error) }
+            outlook?.note?.let { Text(it, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error) }
         }
     }
 }
 
 @Composable
 private fun ProbScale() {
-    val cs = MaterialTheme.colorScheme
+    val colors = MaterialTheme.colorScheme
     Row(verticalAlignment = Alignment.CenterVertically) {
-        Text("0%", style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant)
+        Text("0%", style = MaterialTheme.typography.labelSmall, color = colors.onSurfaceVariant)
         Box(Modifier.padding(horizontal = 4.dp).size(44.dp, 8.dp).clip(RoundedCornerShape(4.dp))
-            .background(Brush.horizontalGradient(listOf(androidx.compose.ui.graphics.lerp(cs.surfaceVariant, cs.primary, 0.15f), cs.primary))))
-        Text("100%", style = MaterialTheme.typography.labelSmall, color = cs.onSurfaceVariant)
+            .background(Brush.horizontalGradient(listOf(androidx.compose.ui.graphics.lerp(colors.surfaceVariant, colors.primary, 0.15f), colors.primary))))
+        Text("100%", style = MaterialTheme.typography.labelSmall, color = colors.onSurfaceVariant)
     }
 }
 
 @Composable
 fun Banner(icon: ImageVector, text: String, warn: Boolean) {
-    val cs = MaterialTheme.colorScheme
-    Surface(color = if (warn) cs.tertiaryContainer else cs.surfaceContainerHigh,
-        contentColor = if (warn) cs.onTertiaryContainer else cs.onSurfaceVariant, shape = RoundedCornerShape(16.dp)) {
+    val colors = MaterialTheme.colorScheme
+    Surface(color = if (warn) colors.tertiaryContainer else colors.surfaceContainerHigh,
+        contentColor = if (warn) colors.onTertiaryContainer else colors.onSurfaceVariant, shape = RoundedCornerShape(16.dp)) {
         Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
             Icon(icon, null, Modifier.size(18.dp)); Spacer(Modifier.width(10.dp))
             Text(text, style = MaterialTheme.typography.bodyMedium)
@@ -258,11 +258,11 @@ private fun ProblemCard(icon: ImageVector, title: String, body: String, action: 
     }
 }
 
-fun problemText(p: Problem?): String = when (p) {
+fun problemText(problem: Problem?): String = when (problem) {
     is Problem.Network -> "No network"
-    is Problem.Radar -> p.msg
+    is Problem.Radar -> problem.message
     Problem.NoKey -> "No radar key"
-    is Problem.Outside -> "${p.region} is picked as the region in Settings, so the map shows ${p.region}. " +
+    is Problem.Outside -> "${problem.region} is picked as the region in Settings, so the map shows ${problem.region}. " +
         "Home is outside it: pick Automatic there, or a region that contains home, for the forecast here."
     null -> ""
 }
@@ -282,9 +282,9 @@ private fun Skeleton() {
 
 @Composable
 fun Shimmer(modifier: Modifier) {
-    val t = rememberInfiniteTransition(label = "shimmer")
-    val a by t.animateFloat(0.35f, 0.8f, infiniteRepeatable(tween(900, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "a")
-    Box(modifier.clip(RoundedCornerShape(14.dp)).graphicsLayer { alpha = a }
+    val transition = rememberInfiniteTransition(label = "shimmer")
+    val pulse by transition.animateFloat(0.35f, 0.8f, infiniteRepeatable(tween(900, easing = FastOutSlowInEasing), RepeatMode.Reverse), label = "a")
+    Box(modifier.clip(RoundedCornerShape(14.dp)).graphicsLayer { alpha = pulse }
         .background(MaterialTheme.colorScheme.surfaceContainerHighest))
 }
 

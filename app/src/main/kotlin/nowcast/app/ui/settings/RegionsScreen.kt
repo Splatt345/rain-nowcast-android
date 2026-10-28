@@ -44,16 +44,16 @@ import java.util.Locale
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun RegionsScreen(repo: Repo, onBack: () -> Unit, modifier: Modifier = Modifier) {
-    val list by repo.regionStore.regions.collectAsState()
+    val regions by repo.regionStore.regions.collectAsState()
     var editing by remember { mutableStateOf<Region?>(null) }
     var isNew by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf<Region?>(null) }
     var confirmReset by remember { mutableStateOf(false) }
 
-    editing?.let { r ->
+    editing?.let { region ->
         BackHandler { editing = null }
-        RegionEditor(repo, r, isNew, others = list.filter { it.id != r.id || isNew }.map { it.id }, onDone = { saved ->
-            if (saved != null) repo.regionStore.save(if (isNew) list + saved else list.map { if (it.id == r.id) saved else it })
+        RegionEditor(repo, region, isNew, others = regions.filter { it.id != region.id || isNew }.map { it.id }, onDone = { saved ->
+            if (saved != null) repo.regionStore.save(if (isNew) regions + saved else regions.map { if (it.id == region.id) saved else it })
             editing = null
         }, modifier)
         return
@@ -68,29 +68,29 @@ fun RegionsScreen(repo: Repo, onBack: () -> Unit, modifier: Modifier = Modifier)
         floatingActionButton = {
             ExtendedFloatingActionButton(onClick = { isNew = true; editing = Region("", "", listOf(4.0, 50.0, 6.0, 51.5)) },
                 icon = { Icon(Icons.Outlined.Add, null) }, text = { Text("Add region") })
-        }) { pad ->
-        LazyColumn(Modifier.padding(pad).fillMaxSize(), contentPadding = PaddingValues(16.dp, 8.dp, 16.dp, 96.dp),
+        }) { innerPadding ->
+        LazyColumn(Modifier.padding(innerPadding).fillMaxSize(), contentPadding = PaddingValues(16.dp, 8.dp, 16.dp, 96.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)) {
-            items(list, key = { it.id }) { r ->
-                ElevatedCard(onClick = { isNew = false; editing = r }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp)) {
+            items(regions, key = { it.id }) { region ->
+                ElevatedCard(onClick = { isNew = false; editing = region }, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(20.dp)) {
                     Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
-                            Text(r.name, style = MaterialTheme.typography.titleMedium)
-                            Text("${r.id} · ${r.source.uppercase()} · ${r.model}" + if (r.weights != null) " · own weights" else "",
+                            Text(region.name, style = MaterialTheme.typography.titleMedium)
+                            Text("${region.id} · ${region.source.uppercase()} · ${region.model}" + if (region.weights != null) " · own weights" else "",
                                 style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Text(r.bbox.joinToString("  ") { "%.1f".format(Locale.ROOT, it) },
+                            Text(region.bbox.joinToString("  ") { "%.1f".format(Locale.ROOT, it) },
                                 style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
-                        IconButton({ confirmDelete = r }, enabled = list.size > 1) { Icon(Icons.Outlined.Delete, "Delete ${r.name}") }
+                        IconButton({ confirmDelete = region }, enabled = regions.size > 1) { Icon(Icons.Outlined.Delete, "Delete ${region.name}") }
                     }
                 }
             }
         }
     }
-    confirmDelete?.let { r ->
-        AlertDialog({ confirmDelete = null }, title = { Text("Delete ${r.name}?") },
+    confirmDelete?.let { region ->
+        AlertDialog({ confirmDelete = null }, title = { Text("Delete ${region.name}?") },
             text = { Text("Its radar crop and settings go; uploaded models stay.") },
-            confirmButton = { TextButton({ repo.regionStore.save(list - r); confirmDelete = null }) { Text("Delete") } },
+            confirmButton = { TextButton({ repo.regionStore.save(regions - region); confirmDelete = null }) { Text("Delete") } },
             dismissButton = { TextButton({ confirmDelete = null }) { Text("Cancel") } })
     }
     if (confirmReset) AlertDialog({ confirmReset = false }, title = { Text("Reset regions?") },
@@ -119,7 +119,7 @@ private fun RegionEditor(repo: Repo, start: Region, isNew: Boolean, others: List
         importing = true
         scope.launch {
             try { model = withContext(Dispatchers.IO) { repo.modelStore.import(uri) } }
-            catch (e: Exception) { importError = e.message ?: "The file could not be read" }
+            catch (problem: Exception) { importError = problem.message ?: "The file could not be read" }
             importing = false
         }
     }
@@ -131,14 +131,14 @@ private fun RegionEditor(repo: Repo, start: Region, isNew: Boolean, others: List
                 navigationIcon = { IconButton({ onDone(null) }) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "Cancel") } },
                 actions = {
                     TextButton({
-                        val w = runCatching { Validate.weights(weights) }
-                        val r = Region(id.trim(), name.trim(), bbox, source, model, w.getOrNull(), start.outlook)
-                        errors = Validate.region(r, others) + listOfNotNull(w.exceptionOrNull()?.message)
-                        if (errors.isEmpty()) onDone(r)
+                        val parsed = runCatching { Validate.weights(weights) }
+                        val region = Region(id.trim(), name.trim(), bbox, source, model, parsed.getOrNull(), start.outlook)
+                        errors = Validate.region(region, others) + listOfNotNull(parsed.exceptionOrNull()?.message)
+                        if (errors.isEmpty()) onDone(region)
                     }, Modifier.heightIn(min = 48.dp)) { Text("Save") }
                 })
-        }) { pad ->
-        Column(Modifier.padding(pad).fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
+        }) { innerPadding ->
+        Column(Modifier.padding(innerPadding).fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)) {
             if (errors.isNotEmpty()) Surface(color = MaterialTheme.colorScheme.errorContainer, shape = RoundedCornerShape(16.dp)) {
                 Column(Modifier.fillMaxWidth().padding(12.dp)) { errors.forEach { Text("• $it", color = MaterialTheme.colorScheme.onErrorContainer) } }
@@ -147,10 +147,10 @@ private fun RegionEditor(repo: Repo, start: Region, isNew: Boolean, others: List
                 OutlinedTextField(name, { name = it }, Modifier.weight(1.4f), label = { Text("Name") }, singleLine = true)
                 OutlinedTextField(id, { id = it.lowercase() }, Modifier.weight(1f), label = { Text("Id") }, singleLine = true, enabled = isNew)
             }
-            BoxMap(bbox) { b -> b.forEachIndexed { i, v -> box[i] = "%.2f".format(Locale.ROOT, v) } }
+            BoxMap(bbox) { edges -> edges.forEachIndexed { i, value -> box[i] = "%.2f".format(Locale.ROOT, value) } }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf("West", "South", "East", "North").forEachIndexed { i, l ->
-                    OutlinedTextField(box[i], { box[i] = it }, Modifier.weight(1f), label = { Text(l) }, singleLine = true,
+                listOf("West", "South", "East", "North").forEachIndexed { i, edge ->
+                    OutlinedTextField(box[i], { box[i] = it }, Modifier.weight(1f), label = { Text(edge) }, singleLine = true,
                         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
                 }
             }
@@ -167,9 +167,9 @@ private fun RegionEditor(repo: Repo, start: Region, isNew: Boolean, others: List
                 placeholder = { Text("12 values 0–1, blank = bundled") }, minLines = 2)
         }
     }
-    importError?.let { e ->
+    importError?.let { message ->
         AlertDialog({ importError = null }, icon = { Icon(Icons.Outlined.ErrorOutline, null) }, title = { Text("Model rejected") },
-            text = { Text(e) }, confirmButton = { TextButton({ importError = null }) { Text("OK") } })
+            text = { Text(message) }, confirmButton = { TextButton({ importError = null }) { Text("OK") } })
     }
 }
 
@@ -181,33 +181,33 @@ private fun BoxMap(bbox: List<Double>, onBox: (List<Double>) -> Unit) {
     var map by remember { mutableStateOf<MapLibreMap?>(null) }
     var style by remember { mutableStateOf<Style?>(null) }
     LaunchedEffect(mapView, dark) {
-        mapView.getMapAsync { m -> map = m; m.uiSettings.isRotateGesturesEnabled = false; m.uiSettings.isLogoEnabled = false; m.uiSettings.isAttributionEnabled = false
-            m.setStyle(mapStyle(dark)) { style = it } }
+        mapView.getMapAsync { loaded -> map = loaded; loaded.uiSettings.isRotateGesturesEnabled = false; loaded.uiSettings.isLogoEnabled = false; loaded.uiSettings.isAttributionEnabled = false
+            loaded.setStyle(mapStyle(dark)) { style = it } }
     }
     val valid = bbox.size == 4 && bbox.all { it.isFinite() } && bbox[0] < bbox[2] && bbox[1] < bbox[3]
     LaunchedEffect(map) {
         if (valid) map?.moveCamera(CameraUpdateFactory.newLatLngBounds(LatLngBounds.from(bbox[3] + 0.5, bbox[2] + 0.8, bbox[1] - 0.5, bbox[0] - 0.8), 24))
     }
     LaunchedEffect(style, bbox) {
-        val st = style ?: return@LaunchedEffect
+        val loadedStyle = style ?: return@LaunchedEffect
         if (!valid) return@LaunchedEffect
-        val (w, s, e, n) = bbox
-        val poly = Polygon.fromLngLats(listOf(listOf(Point.fromLngLat(w, s), Point.fromLngLat(e, s), Point.fromLngLat(e, n),
-            Point.fromLngLat(w, n), Point.fromLngLat(w, s))))
-        val src = st.getSourceAs<GeoJsonSource>("box")
-        if (src == null) {
-            st.addSource(GeoJsonSource("box", poly))
-            st.addLayer(FillLayer("box-fill", "box").withProperties(fillColor("#1F5FA8"), fillOpacity(0.18f)))
-            st.addLayer(LineLayer("box-line", "box").withProperties(lineColor("#1F5FA8"), lineWidth(2.5f)))
-        } else src.setGeoJson(poly)
+        val (west, south, east, north) = bbox
+        val polygon = Polygon.fromLngLats(listOf(listOf(Point.fromLngLat(west, south), Point.fromLngLat(east, south), Point.fromLngLat(east, north),
+            Point.fromLngLat(west, north), Point.fromLngLat(west, south))))
+        val existing = loadedStyle.getSourceAs<GeoJsonSource>("box")
+        if (existing == null) {
+            loadedStyle.addSource(GeoJsonSource("box", polygon))
+            loadedStyle.addLayer(FillLayer("box-fill", "box").withProperties(fillColor("#1F5FA8"), fillOpacity(0.18f)))
+            loadedStyle.addLayer(LineLayer("box-line", "box").withProperties(lineColor("#1F5FA8"), lineWidth(2.5f)))
+        } else existing.setGeoJson(polygon)
     }
     Box(Modifier.fillMaxWidth().height(240.dp).clip(RoundedCornerShape(20.dp))) {
         AndroidView({ mapView }, Modifier.matchParentSize())
         FilledTonalButton({
-            map?.projection?.visibleRegion?.latLngBounds?.let { b ->
+            map?.projection?.visibleRegion?.latLngBounds?.let { visible ->
                 // inset a little so the box is visible inside the view it came from
-                val dx = (b.longitudeEast - b.longitudeWest) * 0.08; val dy = (b.latitudeNorth - b.latitudeSouth) * 0.08
-                onBox(listOf(b.longitudeWest + dx, b.latitudeSouth + dy, b.longitudeEast - dx, b.latitudeNorth - dy))
+                val dx = (visible.longitudeEast - visible.longitudeWest) * 0.08; val dy = (visible.latitudeNorth - visible.latitudeSouth) * 0.08
+                onBox(listOf(visible.longitudeWest + dx, visible.latitudeSouth + dy, visible.longitudeEast - dx, visible.latitudeNorth - dy))
             }
         }, Modifier.align(Alignment.TopEnd).padding(8.dp).heightIn(min = 48.dp)) {
             Icon(Icons.Outlined.CropFree, null); Spacer(Modifier.width(6.dp)); Text("Use visible area")
@@ -224,7 +224,7 @@ private fun <T> Dropdown(label: String, value: T, options: List<T>, show: (T) ->
             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(open) },
             modifier = Modifier.fillMaxWidth().menuAnchor(ExposedDropdownMenuAnchorType.PrimaryNotEditable))
         ExposedDropdownMenu(open, { open = false }) {
-            options.forEach { o -> DropdownMenuItem({ Text(show(o)) }, { onPick(o); open = false }) }
+            options.forEach { option -> DropdownMenuItem({ Text(show(option)) }, { onPick(option); open = false }) }
         }
     }
 }

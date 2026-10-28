@@ -33,7 +33,7 @@ object Locator {
     /** Android 10+ keeps location from a background worker unless "Allow all the time" is granted. */
     fun canInBackground(ctx: Context) = Build.VERSION.SDK_INT < 29 || granted(ctx, Manifest.permission.ACCESS_BACKGROUND_LOCATION)
 
-    private fun granted(ctx: Context, p: String) = ctx.checkSelfPermission(p) == PackageManager.PERMISSION_GRANTED
+    private fun granted(ctx: Context, permission: String) = ctx.checkSelfPermission(permission) == PackageManager.PERMISSION_GRANTED
 
     fun moved(home: Pair<Double, Double>, lat: Double, lon: Double) =
         abs(home.first - lat) > MOVED_DEG || abs(home.second - lon) > MOVED_DEG
@@ -42,19 +42,19 @@ object Locator {
     @SuppressLint("MissingPermission")
     suspend fun fix(ctx: Context): Location? {
         if (!canLocate(ctx)) return null
-        val lm = ctx.getSystemService(LocationManager::class.java)
+        val locationManager = ctx.getSystemService(LocationManager::class.java)
         val recent = (if (Build.VERSION.SDK_INT >= 31) listOf(LocationManager.FUSED_PROVIDER) else emptyList())
             .plus(listOf(LocationManager.PASSIVE_PROVIDER, LocationManager.NETWORK_PROVIDER, LocationManager.GPS_PROVIDER))
-            .mapNotNull { runCatching { lm.getLastKnownLocation(it) }.getOrNull() }.maxByOrNull { it.time }
+            .mapNotNull { runCatching { locationManager.getLastKnownLocation(it) }.getOrNull() }.maxByOrNull { it.time }
         if (recent != null && System.currentTimeMillis() - recent.time < FRESH_MS) return recent
-        val provider = provider(lm) ?: return recent
+        val provider = provider(locationManager) ?: return recent
         if (Build.VERSION.SDK_INT < 30) return recent
         return withTimeoutOrNull(20_000) {
-            suspendCancellableCoroutine<Location?> { c ->
+            suspendCancellableCoroutine<Location?> { continuation ->
                 val cancel = CancellationSignal()
-                c.invokeOnCancellation { cancel.cancel() }
-                try { lm.getCurrentLocation(provider, cancel, ctx.mainExecutor) { if (c.isActive) c.resume(it) } }
-                catch (e: Exception) { if (c.isActive) c.resume(null) }
+                continuation.invokeOnCancellation { cancel.cancel() }
+                try { locationManager.getCurrentLocation(provider, cancel, ctx.mainExecutor) { if (continuation.isActive) continuation.resume(it) } }
+                catch (e: Exception) { if (continuation.isActive) continuation.resume(null) }
             }
         } ?: recent
     }
@@ -66,22 +66,22 @@ object Locator {
      */
     @SuppressLint("MissingPermission")
     fun updates(ctx: Context): Flow<Location> = callbackFlow {
-        val lm = ctx.getSystemService(LocationManager::class.java)
-        val provider = if (canLocate(ctx)) provider(lm) else null
+        val locationManager = ctx.getSystemService(LocationManager::class.java)
+        val provider = if (canLocate(ctx)) provider(locationManager) else null
         if (provider == null) { close(); return@callbackFlow }
-        val l = LocationListener { trySend(it) }
+        val listener = LocationListener { trySend(it) }
         runCatching {
             if (Build.VERSION.SDK_INT >= 31)
-                lm.requestLocationUpdates(provider, LocationRequest.Builder(60_000L).setMinUpdateDistanceMeters(300f)
-                    .setQuality(LocationRequest.QUALITY_HIGH_ACCURACY).build(), ctx.mainExecutor, l)
-            else lm.requestLocationUpdates(provider, 60_000L, 300f, l, Looper.getMainLooper())
+                locationManager.requestLocationUpdates(provider, LocationRequest.Builder(60_000L).setMinUpdateDistanceMeters(300f)
+                    .setQuality(LocationRequest.QUALITY_HIGH_ACCURACY).build(), ctx.mainExecutor, listener)
+            else locationManager.requestLocationUpdates(provider, 60_000L, 300f, listener, Looper.getMainLooper())
         }.onFailure { close() }
-        awaitClose { lm.removeUpdates(l) }
+        awaitClose { locationManager.removeUpdates(listener) }
     }
 
     /** Fused (Android 12+) mixes Wi-Fi, cell and GPS at balanced power; before that, network, then GPS. */
-    private fun provider(lm: LocationManager) =
+    private fun provider(locationManager: LocationManager) =
         (if (Build.VERSION.SDK_INT >= 31) listOf(LocationManager.FUSED_PROVIDER) else emptyList())
             .plus(listOf(LocationManager.NETWORK_PROVIDER, LocationManager.GPS_PROVIDER))
-            .firstOrNull { runCatching { lm.isProviderEnabled(it) }.getOrDefault(false) }
+            .firstOrNull { runCatching { locationManager.isProviderEnabled(it) }.getOrDefault(false) }
 }

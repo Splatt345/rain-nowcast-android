@@ -25,8 +25,8 @@ object Rng {
     fun normals(seed: Long, n: Int, par: Par = Par.SERIAL): DoubleArray = normalsInto(seed, DoubleArray(n), par)
 
     fun normalsInto(seed: Long, out: DoubleArray, par: Par = Par.SERIAL): DoubleArray {
-        par.run(out.size) { a, b ->
-            for (i in a until b)
+        par.run(out.size) { start, end ->
+            for (i in start until end)
                 out[i] = sqrt(-2.0 * ln(1.0 - uniform(seed, 2 * i))) * cos(2.0 * PI * uniform(seed, 2 * i + 1))
         }
         return out
