@@ -131,7 +131,7 @@ private fun Header(region: String?, age: Int?, loading: Boolean, source: String)
 
 @Composable
 private fun Stats(p: nowcast.engine.PointForecast, age: Int) {
-    val i = p.minutes.indexOfFirst { it >= age }.coerceAtLeast(0)
+    val i = p.minutes.indexOfFirst { it >= age }.let { if (it < 0) p.minutes.lastIndex else it }    // past the series: its end, not the radar an hour back
     val rate = p.values[i]
     Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
         // counted from now, like the summary sentence (rainChance starts at the radar frame)

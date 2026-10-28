@@ -29,12 +29,16 @@ class Members private constructor(val count: Int, val nLead: Int, val n: Int, pr
     companion object {
         fun alloc(count: Int, nLead: Int, n: Int, dir: File? = null): Members {
             val bytes = 4L * count * nLead * n
-            val buf = if (dir == null) ByteBuffer.allocateDirect(bytes.toInt()) else {
-                // unlinked at once: the mapping keeps it alive, nothing is left behind, and a new run never
-                // writes into a file an older forecast still reads
-                val file = File.createTempFile("members", ".f32", dir)
-                try { RandomAccessFile(file, "rw").use { it.channel.map(FileChannel.MapMode.READ_WRITE, 0, bytes) } } finally { file.delete() }
-            }
+            // unlinked at once: the mapping keeps it alive, nothing is left behind, and a new run never
+            // writes into a file an older forecast still reads. A nearly full disk falls back to memory:
+            // the file is sparse, and a page that finds no space on write is a SIGBUS, not an exception.
+            // ponytail: free-space check, not a reservation; posix_fallocate (android.system.Os) if it ever bites.
+            val buf = dir?.takeIf { it.usableSpace > 2 * bytes + (64L shl 20) }?.let {
+                runCatching {
+                    val file = File.createTempFile("members", ".f32", dir)
+                    try { RandomAccessFile(file, "rw").use { it.channel.map(FileChannel.MapMode.READ_WRITE, 0, bytes) } } finally { file.delete() }
+                }.getOrNull()
+            } ?: ByteBuffer.allocateDirect(bytes.toInt())
             return Members(count, nLead, n, buf.order(ByteOrder.nativeOrder()))
         }
 

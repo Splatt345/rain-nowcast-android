@@ -23,6 +23,7 @@ class WidgetGallery : Activity() {
     private val host by lazy { AppWidgetHost(this, 4242) }
     private var id = AppWidgetManager.INVALID_APPWIDGET_ID
 
+    @android.annotation.SuppressLint("NewApi")    // a screenshot tool, run on API 31+ emulators
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val type = WidgetType.valueOf(intent.getStringExtra("type") ?: "SUMMARY")
