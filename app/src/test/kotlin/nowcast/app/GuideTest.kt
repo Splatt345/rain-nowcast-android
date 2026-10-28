@@ -5,7 +5,6 @@ import nowcast.app.ui.Block
 import nowcast.app.ui.GUIDE
 import nowcast.app.ui.Markdown
 import org.junit.Assert.*
-import org.junit.Assume.assumeTrue
 import org.junit.Test
 import java.io.File
 
@@ -25,14 +24,17 @@ class GuideTest {
 
     @Test fun theBundledGuideParses() {
         val b = Markdown.parse(asset.readText())
-        assertEquals(Block.Heading(1, "Train the models for your own region"), b.first())
-        assertTrue(b.filterIsInstance<Block.Table>().any { t -> t.rows.any { it.first() == "Japan" } })
+        assertEquals(Block.Heading(1, "Your own region"), b.first())
+        assertTrue(b.filterIsInstance<Block.Table>().any { t -> t.header.first() == "part" })     // the model contract
+        assertEquals(listOf("harvest.py", "train.py", "export.py"),
+            b.filterIsInstance<Block.Code>().mapNotNull { Regex("^# (\\w+\\.py)").find(it.text)?.groupValues?.get(1) })
     }
 
-    /** The guide lives in local_weather_model; this copy must follow it. */
-    @Test fun matchesTheResearchRepo() {
-        val src = File(System.getProperty("user.home"), "Projects/local_weather_model/docs/TRAIN_YOUR_REGION.md")
-        assumeTrue("research repo not checked out", src.exists())
-        assertEquals("cp ${src.path} app/src/main/assets/$GUIDE", src.readText(), asset.readText())
+    /** The reader has the app and nothing else: no repository files, folders or commands from it. */
+    @Test fun needsNothingButTheApp() {
+        val text = asset.readText()
+        for (s in listOf("nowcast.", "nowcast/", ".venv", "HANDOVER", "PREREGISTRATION", "NOWCAST_REGION", "regions/",
+                "selfcheck", "outlook_export", "data/regions", "rain-nowcast-android", "local_weather_model"))
+            assertFalse(s, s in text)
     }
 }

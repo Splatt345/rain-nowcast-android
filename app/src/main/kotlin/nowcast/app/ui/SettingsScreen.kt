@@ -172,7 +172,7 @@ private fun Main(repo: Repo, openRegions: () -> Unit, openGuide: () -> Unit, mod
                 }
             }
             Item(Icons.Outlined.Layers, "Regions and models", "${list.size} regions · add, edit, upload a model", onClick = openRegions)
-            Item(Icons.Outlined.School, "Train a model for your region", "The bundled models know Belgium; how to make your own",
+            Item(Icons.Outlined.School, "Your own region", "Use the app outside Belgium, or train a model for it",
                 onClick = openGuide)
         }
 

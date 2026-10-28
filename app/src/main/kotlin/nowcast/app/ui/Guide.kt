@@ -106,7 +106,7 @@ fun GuideScreen(onBack: () -> Unit, modifier: Modifier = Modifier) {
 
     Scaffold(modifier, containerColor = cs.surface, contentWindowInsets = WindowInsets(0),
         topBar = {
-            TopAppBar({ Text("Train for your region") }, windowInsets = WindowInsets(0),
+            TopAppBar({ Text("Your own region") }, windowInsets = WindowInsets(0),
                 navigationIcon = { IconButton(onBack) { Icon(Icons.AutoMirrored.Outlined.ArrowBack, "Back") } })
         }) { pad ->
         SelectionContainer {
@@ -146,5 +146,5 @@ fun GuideScreen(onBack: () -> Unit, modifier: Modifier = Modifier) {
     }
 }
 
-/** Copied from local_weather_model/docs/TRAIN_YOUR_REGION.md; GuideTest fails when the two drift apart. */
+/** For someone with only the app: its own document, not a copy of the research training guide. */
 const val GUIDE = "train_your_region.md"
