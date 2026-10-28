@@ -74,7 +74,7 @@ class Bench {
                 val p = fc.point(lat, lon, now)
                 val s = Render.mercatorSampler(fc.geo, be.bbox, width = 512)
                 val lv = mapLevels(fc, s); Render.rasterMotion(fc.motion, s)
-                println("BENCH cycle ok: model ${fc.modelUsed} ${fc.modelError ?: ""} point ${hash(p.values)} levels ${lv.size}")
+                println("BENCH cycle ok: model ${fc.modelUsed} ${fc.modelError ?: ""} point ${hash(p.values)} levels ${lv.size} ${fc.timings}")
                 return
             }
             val h = fr[0].geo.h; val w = fr[0].geo.w
