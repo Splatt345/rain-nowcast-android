@@ -15,7 +15,11 @@ import kotlin.math.sqrt
  * docstring for the configuration and the (parity-only) differences from pysteps.
  * Every function below names the stepsport function it mirrors.
  */
-class EnsembleResult(val members: Array<Array<FloatArray>>, val motion: Motion, val h: Int, val w: Int)
+class EnsembleResult(val members: Array<Array<FloatArray>>, val motion: Motion, val h: Int, val w: Int,
+                     val timings: Map<String, Double> = emptyMap())
+
+/** Seconds since [t0] (System.nanoTime). */
+internal fun since(t0: Long) = (System.nanoTime() - t0) / 1e9
 
 internal const val N_LEVELS = 6
 private const val AR_ORDER = 2
@@ -166,46 +170,72 @@ internal fun laplace(u: Double): Double {
 }
 
 /** sl_step: one semi-Lagrangian step (n_iter 1), displacement updated in place. */
-private fun slStep(dx: DoubleArray, dy: DoubleArray, vx: Grid, vy: Grid) {
+private fun slStep(dx: DoubleArray, dy: DoubleArray, vx: Grid, vy: Grid, par: Par = Par.SERIAL) {
     val w = vx.w
-    for (i in dx.indices) {
-        val r = (i / w) + dy[i]; val c = (i % w) + dx[i]
-        val ix = sampleClamped(vx, r, c); val iy = sampleClamped(vy, r, c)
-        dx[i] -= sampleClamped(vx, r - iy / 2.0, c - ix / 2.0)
-        dy[i] -= sampleClamped(vy, r - iy / 2.0, c - ix / 2.0)
+    par.run(dx.size) { from, until ->
+        for (i in from until until) {
+            val r = (i / w) + dy[i]; val c = (i % w) + dx[i]
+            // sampleClamped of vx and vy at the same point, sharing the cell and weights
+            var ix = 0.0; var iy = 0.0
+            clampedCell(vx.h, w, r, c) { a, b, e, d, fr, fc -> ix = bilinear0(vx.v, a, b, e, d, fr, fc); iy = bilinear0(vy.v, a, b, e, d, fr, fc) }
+            clampedCell(vx.h, w, r - iy / 2.0, c - ix / 2.0) { a, b, e, d, fr, fc ->
+                dx[i] -= bilinear0(vx.v, a, b, e, d, fr, fc); dy[i] -= bilinear0(vy.v, a, b, e, d, fr, fc) }
+        }
     }
 }
 
 /** warp */
-private fun warp(field: Grid, dx: DoubleArray, dy: DoubleArray, outval: Double = Double.NaN) =
-    DoubleArray(dx.size) { i ->
-        val v = sampleOrNaN(field, (i / field.w) + dy[i], (i % field.w) + dx[i])
-        if (v.isNaN()) outval else v
+private fun warp(field: Grid, dx: DoubleArray, dy: DoubleArray, outval: Double = Double.NaN,
+                 out: DoubleArray = DoubleArray(dx.size), par: Par = Par.SERIAL): DoubleArray {
+    par.run(dx.size) { from, until ->
+        for (i in from until until) {
+            val v = sampleOrNaN(field, (i / field.w) + dy[i], (i % field.w) + dx[i])
+            out[i] = if (v.isNaN()) outval else v
+        }
     }
-
-/** advect: extrapolate(field, V, steps, outval='min')[-1] */
-internal fun advect(field: DoubleArray, mo: Motion, steps: Int): DoubleArray {
-    val dx = DoubleArray(field.size); val dy = DoubleArray(field.size)
-    repeat(steps) { slStep(dx, dy, mo.vx, mo.vy) }
-    return warp(Grid(mo.vx.h, mo.vx.w, field), dx, dy, field.min())
+    return out
 }
 
-/** cross: binary dilation by the 3x3 cross, zero border. */
-private fun cross(b: BooleanArray, h: Int, w: Int) = BooleanArray(b.size) { i ->
-    val r = i / w; val c = i % w
-    b[i] || (r > 0 && b[i - w]) || (r < h - 1 && b[i + w]) || (c > 0 && b[i - 1]) || (c < w - 1 && b[i + 1])
+/** advect: extrapolate(field, V, steps, outval='min')[-1] */
+internal fun advect(field: DoubleArray, mo: Motion, steps: Int, par: Par = Par.SERIAL): DoubleArray {
+    val dx = DoubleArray(field.size); val dy = DoubleArray(field.size)
+    repeat(steps) { slStep(dx, dy, mo.vx, mo.vy, par) }
+    return warp(Grid(mo.vx.h, mo.vx.w, field), dx, dy, field.min(), par = par)
+}
+
+/** L1 distance to the nearest true pixel, inside the grid (two-pass chamfer; exact for the
+ *  4-neighbour metric), in place: [d] comes in as 0 at true pixels and [FAR] elsewhere. */
+private const val FAR = Int.MAX_VALUE / 2
+private fun l1Distance(d: IntArray, h: Int, w: Int) {
+    for (r in 0 until h) for (c in 0 until w) {
+        val i = r * w + c
+        if (r > 0 && d[i - w] + 1 < d[i]) d[i] = d[i - w] + 1
+        if (c > 0 && d[i - 1] + 1 < d[i]) d[i] = d[i - 1] + 1
+    }
+    for (r in h - 1 downTo 0) for (c in w - 1 downTo 0) {
+        val i = r * w + c
+        if (r < h - 1 && d[i + w] + 1 < d[i]) d[i] = d[i + w] + 1
+        if (c < w - 1 && d[i + 1] + 1 < d[i]) d[i] = d[i + 1] + 1
+    }
 }
 
 internal fun structRadius(kmPerPixel: Double, timestep: Double) =
     maxOf(1, ((MASK_F * timestep / kmPerPixel - 1) / 2.0).toInt())
 
-/** dilated_mask */
-internal fun dilatedMask(b: BooleanArray, h: Int, w: Int, radius: Int, rim: Int = MASK_RIM): DoubleArray {
-    var d = b
-    repeat(radius) { d = cross(d, h, w) }
-    val m = DoubleArray(b.size) { if (d[it]) 1.0 else 0.0 }
-    repeat(rim) { d = cross(d, h, w); for (i in m.indices) if (d[i]) m[i] += 1.0 }
-    val mx = m.max()
+/** dilated_mask. Dilating k times by the 3x3 cross (zero border) reaches exactly the pixels
+ *  within L1 distance k, so the mask is a clamp of that distance: 1 + rim inside the radius,
+ *  falling by one per pixel across the rim. */
+internal fun dilatedMask(b: BooleanArray, h: Int, w: Int, radius: Int, rim: Int = MASK_RIM): DoubleArray =
+    maskFromDistance(IntArray(b.size) { if (b[it]) 0 else FAR }, h, w, radius, rim, DoubleArray(b.size))
+
+/** dilatedMask of the pixels where [d] is 0 ([d] is overwritten), into [m]. */
+private fun maskFromDistance(d: IntArray, h: Int, w: Int, radius: Int, rim: Int, m: DoubleArray): DoubleArray {
+    l1Distance(d, h, w)
+    var mx = 0.0
+    for (i in m.indices) {
+        val x = d[i]; m[i] = if (x <= radius) 1.0 + rim else maxOf(0, radius + rim + 1 - x).toDouble()
+        if (m[i] > mx) mx = m[i]
+    }
     if (mx > 0) for (i in m.indices) m[i] /= mx
     return m
 }
@@ -218,39 +248,59 @@ internal fun percentileSorted(s: DoubleArray, q: Double): Double {
     return if (g >= 0.5) s[hi] - d * (1 - g) else s[lo] + d * g
 }
 
-/** Stable argsort (bottom-up merge sort on indices). */
-internal fun argsortStable(v: DoubleArray): IntArray {
-    var a = IntArray(v.size) { it }; var b = IntArray(v.size)
-    var width = 1
-    while (width < v.size) {
-        var lo = 0
-        while (lo < v.size) {
-            val mid = minOf(lo + width, v.size); val hi = minOf(lo + 2 * width, v.size)
-            var i = lo; var j = mid; var k = lo
-            while (i < mid && j < hi) b[k++] = if (v[a[j]] < v[a[i]]) a[j++] else a[i++]
-            while (i < mid) b[k++] = a[i++]
-            while (j < hi) b[k++] = a[j++]
-            lo = hi
-        }
-        val t = a; a = b; b = t; width *= 2
+/** Stable argsort of non-NaN values: LSD radix sort, 16 bits a pass, on the doubles' bits
+ *  mapped to unsigned order (-0.0 as 0.0, the ties of `<`). Skips passes where all agree. */
+internal fun argsortStable(v: DoubleArray): IntArray = argsortStable(v, v.size, SortBuf(v.size))
+
+/** Reusable buffers for probmatch and its argsort, one set per member. */
+internal class SortBuf(n: Int) {
+    var key = LongArray(n); var idx = IntArray(n); var k2 = LongArray(n); var i2 = IntArray(n)
+    val count = IntArray(1 shl 16); val wet = IntArray(n); val vals = DoubleArray(n)
+}
+
+/** argsortStable of v[0 until n]; the result is one of [b]'s arrays. */
+internal fun argsortStable(v: DoubleArray, n: Int, b: SortBuf): IntArray {
+    var key = b.key; var idx = b.idx; var k2 = b.k2; var i2 = b.i2; val count = b.count
+    for (i in 0 until n) {
+        val bits = java.lang.Double.doubleToRawLongBits(if (v[i] == 0.0) 0.0 else v[i])
+        key[i] = if (bits < 0) bits.inv() else bits xor Long.MIN_VALUE
+        idx[i] = i
     }
-    return a
+    for (shift in 0 until 64 step 16) {
+        count.fill(0)
+        for (i in 0 until n) count[((key[i] ushr shift) and 0xFFFF).toInt()]++
+        if (n == 0 || count[((key[0] ushr shift) and 0xFFFF).toInt()] == n) continue
+        var sum = 0
+        for (d in count.indices) { val c = count[d]; count[d] = sum; sum += c }
+        for (i in 0 until n) {
+            val d = ((key[i] ushr shift) and 0xFFFF).toInt(); val o = count[d]++
+            k2[o] = key[i]; i2[o] = idx[i]
+        }
+        val tk = key; key = k2; k2 = tk; val ti = idx; idx = i2; i2 = ti
+    }
+    b.key = key; b.idx = idx; b.k2 = k2; b.i2 = i2
+    return idx
 }
 
 /** probmatch, with the target pre-sorted (its zeroing below the percentile keeps it sorted,
  *  since the zero value is its minimum). */
-internal fun probmatch(initial: DoubleArray, targetSorted: DoubleArray): DoubleArray {
+internal fun probmatch(initial: DoubleArray, targetSorted: DoubleArray,
+                       out: DoubleArray = DoubleArray(initial.size), buf: SortBuf = SortBuf(initial.size)): DoubleArray {
     val z = initial.min(); val zt = targetSorted[0]
     var nWet = 0; for (x in initial) if (x > z) nWet++
     var nWetT = 0; for (x in targetSorted) if (x > zt) nWetT++
     val p = if (nWetT > nWet) percentileSorted(targetSorted, 100 * (1 - nWet.toDouble() / initial.size))
             else Double.NEGATIVE_INFINITY
-    val order = argsortStable(initial)
-    val out = DoubleArray(initial.size)
-    for (rank in order.indices) {
-        val i = order[rank]
-        val t = targetSorted[rank]
-        out[i] = if (initial[i] == z) zt else if (t < p) zt else t
+    // A stable argsort puts every pixel at the minimum z first, in index order, and those all
+    // map to zt: so sort only the others, ranked after them. Same ranks, a fraction of the work.
+    out.fill(zt)
+    val wet = buf.wet; val vals = buf.vals; var j = 0
+    for (i in initial.indices) if (initial[i] > z) { wet[j] = i; vals[j] = initial[i]; j++ }   // the nWet predicate: NaN-safe
+    val order = argsortStable(vals, nWet, buf)
+    val base = initial.size - nWet
+    for (r in 0 until nWet) {
+        val t = targetSorted[base + r]
+        out[wet[order[r]]] = if (t < p) zt else t
     }
     return out
 }
@@ -265,36 +315,60 @@ internal fun fromDbSteps(db: Double): Float {
 internal class StepsSetup(
     val p: Int, val wts: Array<DoubleArray>, val filt: DoubleArray, val cascades: List<Cascade>,
     val gammaRaw: Array<DoubleArray>, val gamma: Array<DoubleArray>, val phi: Array<DoubleArray>,
-    val last: DoubleArray, val lastSorted: DoubleArray, val fft: Fft2,
-)
+    val last: DoubleArray, val lastSorted: DoubleArray, val fft: Fft2, val par: Par,
+) {
+    /** Half spectra (columns 0..w/2) of the last p cascades' normalised levels, [level][lag] as
+     *  re, im pairs: the AR(p) recursion is linear, so members run it in Fourier space. */
+    val spec: Array<Array<Pair<DoubleArray, DoubleArray>>> = Array(N_LEVELS) { i -> Array(p) { j ->
+        val re = cascades[cascades.size - p + j].levels[i].copyOf(); val im = DoubleArray(re.size)
+        fft.forward(re, im)
+        half(re, fft.h, fft.w) to half(im, fft.h, fft.w)
+    } }
+    /** filt * band per level on the half spectrum, DC zeroed (the noise levels are normalised). */
+    val noiseBand: Array<DoubleArray> = Array(N_LEVELS) { i ->
+        val hw = fft.w / 2 + 1
+        DoubleArray(fft.h * hw) { o -> if (o == 0) 0.0 else filt[(o / hw) * fft.w + o % hw] * wts[i][(o / hw) * fft.w + o % hw] }
+    }
+    /** Parseval weight of each half-spectrum cell in the full one: columns 0 and w/2 are their own mirror. */
+    val parseval: DoubleArray = DoubleArray(fft.h * (fft.w / 2 + 1)) { o ->
+        val c = o % (fft.w / 2 + 1); if (c == 0 || 2 * c == fft.w) 1.0 else 2.0
+    }
+}
+
+private fun half(full: DoubleArray, h: Int, w: Int): DoubleArray {
+    val hw = w / 2 + 1
+    return DoubleArray(h * hw) { full[(it / hw) * w + it % hw] }
+}
+
 
 /** setup; null when pysteps would return a zero forecast. */
-internal fun setup(db3: List<DoubleArray>, mo: Motion): StepsSetup? {
+internal fun setup(db3: List<DoubleArray>, mo: Motion, par: Par = Par.SERIAL): StepsSetup? {
     val h = mo.vx.h; val w = mo.vx.w
     val taper = tukey(h, w)
     val rain = db3.map { hasRain(it, taper) }
     if (!rain[2] || !rain[1]) return null
     val p = if (rain[0]) AR_ORDER else 1
-    val frames = db3.takeLast(p + 1).mapIndexed { i, f -> if (i < p) advect(f, mo, p - i) else f.copyOf() }
-    val fft = Fft2(h, w)
+    val frames = db3.takeLast(p + 1).mapIndexed { i, f -> if (i < p) advect(f, mo, p - i, par) else f.copyOf() }
+    val fft = Fft2(h, w, par)
     val wts = bandpass(h, w)
     val filt = noiseFilter(frames, h, w, fft)
     val dec = frames.map { decompose(it, wts, fft) }
     val gammaRaw = Array(N_LEVELS) { i -> DoubleArray(p) { l -> corrcoef(dec.last().levels[i], dec[dec.size - l - 2].levels[i]) } }
     val fits = gammaRaw.map { arParams(it) }
     return StepsSetup(p, wts, filt, dec, gammaRaw, fits.map { it.second }.toTypedArray(),
-        fits.map { it.first }.toTypedArray(), frames.last(), frames.last().sorted().toDoubleArray(), fft)
+        fits.map { it.first }.toTypedArray(), frames.last(), frames.last().sorted().toDoubleArray(), fft, par)
 }
 
 /** member: n_lead fields in mm/h (from_db applied), NaN outside the domain. */
 internal fun member(s: StepsSetup, mo: Motion, m: Int, nLead: Int, seed: Long, kmPerPixel: Double,
-                    timestep: Double, onFirst: ((DoubleArray, DoubleArray) -> Unit)? = null): Array<FloatArray> {
+                    timestep: Double, onFirst: ((DoubleArray, DoubleArray) -> Unit)? = null, par: Par = s.par): Array<FloatArray> {
     val h = mo.vx.h; val w = mo.vx.w; val n = h * w; val p = s.p
-    // casc[i][0] oldest .. casc[i][p-1] newest
-    val casc = Array(N_LEVELS) { i -> Array(p) { j -> s.cascades[s.cascades.size - p + j].levels[i].copyOf() } }
     val mu = s.cascades.last().mu; val sd = s.cascades.last().sd
     val radius = structRadius(kmPerPixel, timestep)
-    var mask = dilatedMask(BooleanArray(n) { s.last[it] >= THR_DB }, h, w, radius)
+    val dist = IntArray(n); val sortBuf = SortBuf(n)
+    val mask = DoubleArray(n)
+    for (i in 0 until n) dist[i] = if (s.last[i] >= THR_DB) 0 else FAR
+    maskFromDistance(dist, h, w, radius, MASK_RIM, mask)
     val u = Rng.uniforms(Rng.stream(seed, m, VEL_STREAM), 2)
     val epsPar = laplace(u[0]); val epsPerp = laplace(u[1])
     // BPS unit vectors, fixed per run
@@ -305,35 +379,88 @@ internal fun member(s: StepsSetup, mo: Motion, m: Int, nLead: Int, seed: Long, k
         if (nn > 1e-12) { parX[i] = a / nn; parY[i] = b / nn }
     }
     val dx = DoubleArray(n); val dy = DoubleArray(n)
-    return Array(nLead) { k ->
-        val eps = noiseField(s.filt, Rng.normals(Rng.stream(seed, m, k), n), s.fft)
-        val epsLv = decompose(eps, s.wts, s.fft).levels
-        val f = DoubleArray(n)
+    // The cascade lives in Fourier space (half spectrum, h x hw): the noise is W * filt * band,
+    // each level normalised by its Parseval std, and only the recomposed field is transformed
+    // back. Same algebra as stepsport; and since the AR recursion does not see the field,
+    // two leads share one forward FFT (their white noise as real + i*imag) and one inverse.
+    val hw = w / 2 + 1; val nh = h * hw
+    // lre[i][0] oldest .. lre[i][p-1] newest
+    val lre = Array(N_LEVELS) { i -> Array(p) { j -> s.spec[i][j].first.copyOf() } }
+    val lim = Array(N_LEVELS) { i -> Array(p) { j -> s.spec[i][j].second.copyOf() } }
+    val zr = DoubleArray(n); val zi = DoubleArray(n)
+    val wr = arrayOf(DoubleArray(nh), DoubleArray(nh)); val wi = arrayOf(DoubleArray(nh), DoubleArray(nh))
+    val fr = arrayOf(DoubleArray(nh), DoubleArray(nh)); val fi = arrayOf(DoubleArray(nh), DoubleArray(nh))
+    val muSum = mu.sum()
+
+    /** One AR step of every level, driven by white-noise spectrum (nr, ni); recomposed spectrum into (outR, outI). */
+    fun step(nr: DoubleArray, ni: DoubleArray, outR: DoubleArray, outI: DoubleArray) {
+        outR.fill(0.0); outI.fill(0.0)
         for (i in 0 until N_LEVELS) {
-            val phi = s.phi[i]; val c = casc[i]
-            val new = DoubleArray(n) { j ->
-                var x = 0.0
-                for (l in 0 until p) x += phi[l] * c[p - 1 - l][j]
-                x + phi[p] * epsLv[i][j]
-            }
-            for (j in 0 until p - 1) c[j] = c[j + 1]
-            c[p - 1] = new
-            for (j in 0 until n) f[j] += new[j] * sd[i] + mu[i]
+            val phi = s.phi[i]; val g = s.noiseBand[i]; val pw = s.parseval; val cr = lre[i]; val ci = lim[i]
+            var ss = 0.0
+            for (o in 0 until nh) ss += pw[o] * g[o] * g[o] * (nr[o] * nr[o] + ni[o] * ni[o])
+            val inv = phi[p] * n / sqrt(ss)       // phi_p / level std (Parseval)
+            val newR = cr[0]; val newI = ci[0]   // the oldest lag, read before written at each o
+            val sdi = sd[i]
+            par.run(nh) { from, until -> for (o in from until until) {
+                val gi = g[o] * inv
+                var xr = gi * nr[o]; var xi = gi * ni[o]
+                for (l in 0 until p) { xr += phi[l] * cr[p - 1 - l][o]; xi += phi[l] * ci[p - 1 - l][o] }
+                newR[o] = xr; newI[o] = xi
+                outR[o] += xr * sdi; outI[o] += xi * sdi
+            } }
+            for (j in 0 until p - 1) { cr[j] = cr[j + 1]; ci[j] = ci[j + 1] }
+            cr[p - 1] = newR; ci[p - 1] = newI
         }
-        // stepsport.recompose sums level by level in this order too
+    }
+
+    // per-lead buffers, reused: allocation, not arithmetic, is what a small Android heap pays for
+    val fBuf = arrayOf(DoubleArray(n), DoubleArray(n)); val pm = DoubleArray(n); val warped = DoubleArray(n)
+    val vx = Grid(h, w); val vy = Grid(h, w)
+    return Array(nLead) { k ->
+        var eps: DoubleArray? = null
+        val f = fBuf[k % 2]
+        if (k % 2 == 0) {
+            val two = k + 1 < nLead
+            Rng.normalsInto(Rng.stream(seed, m, k), zr, par)
+            if (k == 0 && onFirst != null) eps = noiseField(s.filt, zr.copyOf(), s.fft)
+            if (two) Rng.normalsInto(Rng.stream(seed, m, k + 1), zi, par) else zi.fill(0.0)
+            s.fft.forward(zr, zi)
+            par.run(h) { r0, r1 -> for (r in r0 until r1) for (c in 0 until hw) {
+                val a = r * w + c; val b = ((h - r) % h) * w + (w - c) % w; val o = r * hw + c
+                // Z = A + iB with A, B Hermitian: A = (Z + conj Z-) / 2, B = (Z - conj Z-) / 2i
+                wr[0][o] = 0.5 * (zr[a] + zr[b]); wi[0][o] = 0.5 * (zi[a] - zi[b])
+                wr[1][o] = 0.5 * (zi[a] + zi[b]); wi[1][o] = -0.5 * (zr[a] - zr[b])
+            } }
+            step(wr[0], wi[0], fr[0], fi[0])
+            if (two) step(wr[1], wi[1], fr[1], fi[1]) else { fr[1].fill(0.0); fi[1].fill(0.0) }
+            // full spectrum of F0 + i F1 (each Hermitian), so the inverse is f0 + i f1
+            par.run(h) { r0, r1 -> for (r in r0 until r1) for (c in 0 until w) {
+                val a = r * w + c
+                val o: Int; val sg: Double
+                if (c < hw) { o = r * hw + c; sg = 1.0 } else { o = ((h - r) % h) * hw + (w - c); sg = -1.0 }
+                zr[a] = fr[0][o] - sg * fi[1][o]; zi[a] = sg * fi[0][o] + fr[1][o]
+            } }
+            s.fft.inverse(zr, zi)
+            for (j in 0 until n) f[j] = zr[j] + muSum
+            if (two) { val g = fBuf[1]; for (j in 0 until n) g[j] = zi[j] + muSum }
+        }
         val fmin = f.min()
         for (j in 0 until n) { f[j] = fmin + (f[j] - fmin) * mask[j]; if (!(f[j] > fmin)) f[j] = fmin }
-        val pm = probmatch(f, s.lastSorted)
-        mask = dilatedMask(BooleanArray(n) { pm[it] >= THR_DB }, h, w, radius)
+        probmatch(f, s.lastSorted, pm, sortBuf)
+        for (i in 0 until n) dist[i] = if (pm[i] >= THR_DB) 0 else FAR
+        maskFromDistance(dist, h, w, radius, MASK_RIM, mask)
         val t = (k + 1) * timestep
         val gPar = P_PAR[0] * t.pow(P_PAR[1]) + P_PAR[2]
         val gPerp = P_PERP[0] * t.pow(P_PERP[1]) + P_PERP[2]
-        val vx = Grid(h, w, DoubleArray(n) { mo.vx.v[it] + (gPar * epsPar * parX[it] + gPerp * epsPerp * -parY[it]) / vsf })
-        val vy = Grid(h, w, DoubleArray(n) { mo.vy.v[it] + (gPar * epsPar * parY[it] + gPerp * epsPerp * parX[it]) / vsf })
-        slStep(dx, dy, vx, vy)
-        if (k == 0) onFirst?.invoke(eps, pm)
-        val out = warp(Grid(h, w, pm), dx, dy)
-        FloatArray(n) { fromDbSteps(out[it]) }
+        par.run(n) { from, until -> for (i in from until until) {
+            vx.v[i] = mo.vx.v[i] + (gPar * epsPar * parX[i] + gPerp * epsPerp * -parY[i]) / vsf
+            vy.v[i] = mo.vy.v[i] + (gPar * epsPar * parY[i] + gPerp * epsPerp * parX[i]) / vsf
+        } }
+        slStep(dx, dy, vx, vy, par)
+        if (eps != null) onFirst?.invoke(eps, pm.copyOf())
+        warp(Grid(h, w, pm), dx, dy, out = warped, par = par)
+        FloatArray(n).also { o -> par.run(n) { from, until -> for (i in from until until) o[i] = fromDbSteps(warped[i]) } }
     }
 }
 
@@ -343,23 +470,37 @@ internal fun member(s: StepsSetup, mo: Motion, m: Int, nLead: Int, seed: Long, k
  */
 fun ensemble(train: List<Grid>, nLead: Int = 12, nMembers: Int = 10, seed: Long = 42,
              kmPerPixel: Double = 1.0, timestep: Double = 5.0, threads: Int = Runtime.getRuntime().availableProcessors()): EnsembleResult {
-    val db = train.takeLast(3).map { g -> g.map(::toDb) }
-    val mo = motion(db)
-    val h = db.last().h; val w = db.last().w
-    val s = setup(db.map { it.v }, mo)
-        ?: return EnsembleResult(Array(nMembers) { Array(nLead) { FloatArray(h * w) } }, mo, h, w)
-    // ponytail: ~40 float64 fields live per member in flight; cap the threads so a 192 MB
-    // Android heap does not run out. Measure per-member peak if this needs to be finer.
-    val rt = Runtime.getRuntime()
-    val free = rt.maxMemory() - (rt.totalMemory() - rt.freeMemory()) - 4L * nMembers * nLead * h * w
-    val byHeap = (free / (40L * 8 * h * w)).toInt()
-    val pool = Executors.newFixedThreadPool(maxOf(1, minOf(threads, nMembers, byHeap)))
+    // Flow and setup split their pixel loops threads-fold; then members run nThreads at a time
+    // (capped by the heap left after setup) and each splits its loops ways-fold, so at most
+    // nThreads * ways <= threads cores are busy.
+    val h = train.last().h; val w = train.last().w
+    val rows = if (threads > 1) Executors.newFixedThreadPool(threads - 1) else null
+    var pool: java.util.concurrent.ExecutorService? = null
     try {
+        val t0 = System.nanoTime()
+        val db = train.takeLast(3).map { g -> g.map(::toDb) }
+        val mo = motion(db, Par(rows, threads))
+        val tFlow = since(t0); val t1 = System.nanoTime()
+        val s = setup(db.map { it.v }, mo, Par(rows, threads))
+            ?: return EnsembleResult(Array(nMembers) { Array(nLead) { FloatArray(h * w) } }, mo, h, w, mapOf("flow" to tFlow))
+        val tSetup = since(t1); val t2 = System.nanoTime()
+        // ponytail: ~40 float64 fields per member (cascade spectra, buffers, transients); cap the
+        // threads so a 192 MB Android heap does not run out. Measured, not derived: 40 was fine
+        // on the AVD; a finer cap would need a per-member peak measurement.
+        val rt = Runtime.getRuntime()
+        val free = rt.maxMemory() - (rt.totalMemory() - rt.freeMemory()) - 4L * nMembers * nLead * h * w
+        val byHeap = (free / (40L * 8 * h * w)).toInt()
+        val nThreads = maxOf(1, minOf(threads, nMembers, byHeap))
+        val ways = maxOf(1, threads / nThreads)
+        val par = Par(rows, ways)
+        pool = Executors.newFixedThreadPool(nThreads)
         val jobs = (0 until nMembers).map { m ->
-            pool.submit<Array<FloatArray>> { member(s, mo, m, nLead, seed, kmPerPixel, timestep) }
+            pool.submit<Array<FloatArray>> { member(s, mo, m, nLead, seed, kmPerPixel, timestep, par = par) }
         }
-        return EnsembleResult(jobs.map { it.get() }.toTypedArray(), mo, h, w)
+        val members = jobs.map { it.get() }.toTypedArray()
+        return EnsembleResult(members, mo, h, w, mapOf("flow" to tFlow, "setup" to tSetup, "members" to since(t2),
+            "threads" to nThreads.toDouble(), "ways" to ways.toDouble()))
     } finally {
-        pool.shutdown()
+        pool?.shutdown(); rows?.shutdown()
     }
 }

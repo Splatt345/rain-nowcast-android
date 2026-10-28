@@ -8,6 +8,8 @@ class Forecast(
     val region: Region, val geo: GridGeo, val past: List<Frame>,
     val members: Array<Array<FloatArray>>, val mean: Array<FloatArray>, val motion: Motion,
     val issued: Instant, val modelUsed: Boolean, val modelError: String?,
+    /** Seconds per stage: flow, setup, members (the ensemble), model, combine, mean. */
+    val timings: Map<String, Double> = emptyMap(),
 ) {
     /** Median frame gap in whole minutes - never ODIM accutime, which lies (it says 15). */
     val intervalMinutes: Int = medianGapMinutes(past)
@@ -54,24 +56,30 @@ class Nowcaster(private val model: SmaatModel?, private val nMembers: Int = 10, 
         // STEPS' velocity perturbations and incremental mask are in km and minutes
         val ens = ensemble(train, 12, nMembers, seed, kmPerPixel = geo.px / 1000.0,
             timestep = medianGapMinutes(frames).toDouble())
+        val timings = LinkedHashMap(ens.timings)
         var members = ens.members; var used = false; var err: String? = null
         if (model != null) {
             try {
+                var t = System.nanoTime()
                 val ml = model.forecast(train, 12)
+                timings["model"] = since(t); t = System.nanoTime()
                 val w = region.weights?.toDoubleArray() ?: Combine.WEIGHTS
                 members = Combine.combine(members, ml, w); used = true
+                timings["combine"] = since(t)
             } catch (e: Exception) {
                 // A nowcast that stops because a network could not run is worse than one without it.
                 err = "${e::class.simpleName}: ${e.message}"
             }
         }
+        val t = System.nanoTime()
         val n = ens.h * ens.w
         val mean = Array(12) { k -> FloatArray(n) { i ->
             var s = 0.0; var c = 0
             for (m in members) { val x = m[k][i]; if (!x.isNaN()) { s += x; c++ } }
             if (c > 0) (s / c).toFloat() else Float.NaN
         } }
-        return Forecast(region, geo, frames, members, mean, ens.motion, frames.last().time, used, err)
+        timings["mean"] = since(t)
+        return Forecast(region, geo, frames, members, mean, ens.motion, frames.last().time, used, err, timings)
     }
 
     /**
