@@ -23,6 +23,8 @@ sealed interface Problem {
     data object NoKey : Problem
     data class Network(val msg: String) : Problem
     data class Radar(val msg: String) : Problem
+    /** Home is outside the region picked in Settings: that region still loads, home gets no point. */
+    data class Outside(val region: String) : Problem
 }
 
 data class UiState(
@@ -86,7 +88,7 @@ class Repo(private val ctx: Context) {
     /** A colour change: the widgets draw with these settings too, so redraw them now rather than at the next refresh. */
     fun updateLook(f: (Settings) -> Settings) { prefs.update(f); scope.launch { runCatching { Widgets.updateAll(ctx) } } }
 
-    private var modelBroken: String? = null           // a failed model is not retried until restart
+    private var modelBroken: String? = null           // a failed model is not retried until another is picked
     private var smaat: Pair<String, SmaatModel>? = null
     private val outlookModel by lazy {
         runCatching {
@@ -102,9 +104,11 @@ class Repo(private val ctx: Context) {
     val canRun: Boolean get() = hasKey || prefs.value.nowcastSource == NowcastSource.OPEN_METEO
     private val openMeteo get() = prefs.value.nowcastSource == NowcastSource.OPEN_METEO
 
-    fun regionFor(lat: Double, lon: Double): Region {
+    /** [chosen]: home's cycle, where a region picked in Settings wins even when home is outside it. */
+    fun regionFor(lat: Double, lon: Double, chosen: Boolean = false): Region {
         val regions = regionStore.regions.value
         val s = prefs.value
+        if (chosen) s.regionId?.let { id -> regions.firstOrNull { it.id == id } }?.let { return it }
         return s.regionId?.let { id -> regions.firstOrNull { it.id == id && it.contains(lat, lon) } }
             ?: Regions.pick(regions, lat, lon)
             ?: s.regionId?.let { id -> regions.firstOrNull { it.id == id } }
@@ -120,23 +124,24 @@ class Repo(private val ctx: Context) {
         // Open-Meteo users without a key: the map has no radar, which is not a problem for the Now screen
         if (key == null && !demo) { if (!openMeteo) flow.update { it.copy(problem = Problem.NoKey, loading = false) }; return@withLock }
         val (lat, lon) = at ?: s.home
-        val region = regionFor(lat, lon)
+        val region = regionFor(lat, lon, chosen = at == null)
         flow.update { it.copy(loading = true, regionName = if (openMeteo) it.regionName else region.name) }
         try {
             val frames = withContext(Dispatchers.IO) {
                 if (demo) Demo.frames(ctx, region)
                 else RadarSource(key, File(ctx.cacheDir, "radar")).run { prune(); latestFrames(region) }
             }
-            val old = flow.value.forecast
+            var old = flow.value.forecast
             val reuse = old != null && Cycle.skip(frames.last().time, old.issued, old.region == region, force)
-            // another region: let go of the old ensemble first, two of them do not fit a 192 MB heap
-            if (!reuse && old != null && old.region != region) flow.update { it.copy(forecast = null) }
+            // a fresh run: let go of the old ensemble first, two of them do not fit a 192 MB heap.
+            // The map keeps its own frames meanwhile.
+            if (!reuse && old != null) { flow.update { it.copy(forecast = null) }; old = null }
             val fc = if (reuse) old!!
             else withContext(Dispatchers.Default) { Nowcaster(if (s.useModel) model(region) else null).run(region, frames) }
             if (fc.modelError != null && modelBroken == null) modelBroken = fc.modelError
             val note = when {
                 !s.useModel -> null
-                modelBroken != null -> "ML model failed (${modelBroken}); ensemble only until the app restarts"
+                modelBroken != null -> "ML model failed (${modelBroken}); ensemble only until you pick a model again"
                 region.model != ModelStore.BUNDLED && !modelStore.isKnown(region.model) ->
                     "${region.model} not found; using the bundled model, which was not trained on this region"
                 region.id != "be" && region.model == ModelStore.BUNDLED -> "The bundled model was trained on Belgium only"
@@ -146,9 +151,11 @@ class Repo(private val ctx: Context) {
             else {
                 val (hl, ho) = s.home
                 val home = fc.region.contains(hl, ho)
-                val point = if (home) withContext(Dispatchers.Default) { fc.point(hl, ho) } else flow.value.point
-                flow.update { it.copy(forecast = fc, point = point, issued = if (home) fc.issued else it.issued, modelOnly = false,
-                    problem = null, modelNote = note, updated = Instant.now()) }
+                val outside = !home && at == null       // home's own cycle, but the picked region is elsewhere
+                val point = if (home) withContext(Dispatchers.Default) { fc.point(hl, ho) } else if (outside) null else flow.value.point
+                flow.update { it.copy(forecast = fc, point = point, issued = if (home) fc.issued else if (outside) null else it.issued,
+                    modelOnly = false, problem = if (outside) Problem.Outside(region.name) else null, modelNote = note,
+                    updated = Instant.now()) }
             }
         } catch (e: RadarException) {
             flow.update { it.copy(problem = Problem.Radar(e.message ?: "Radar unavailable")) }
@@ -269,6 +276,26 @@ class Repo(private val ctx: Context) {
         } catch (e: Exception) {
             modelBroken = e.message ?: e::class.simpleName; null
         }
+    }
+
+    /**
+     * Swap the nowcast model live: [name] for the region on screen, or null for the ensemble alone.
+     * The forecast re-runs at once on the radar already downloaded.
+     */
+    fun setModel(name: String?) {
+        val region = flow.value.forecast?.region?.let { r -> regionStore.regions.value.firstOrNull { it.id == r.id } }
+            ?: regionFor(prefs.value.home.first, prefs.value.home.second, chosen = true)
+        if (name == null) prefs.update { it.copy(useModel = false) }
+        else {
+            prefs.update { it.copy(useModel = true) }
+            if (region.model != name) regionStore.save(regionStore.regions.value.map { if (it.id == region.id) it.copy(model = name) else it })
+        }
+        modelBroken = null
+        // a region looked up on the map re-runs as that look-up; home's own region as home's cycle
+        val (hl, ho) = prefs.value.home
+        val at = region.takeIf { it.id != regionFor(hl, ho, chosen = true).id }
+            ?.let { (it.bbox[1] + it.bbox[3]) / 2 to (it.bbox[0] + it.bbox[2]) / 2 }
+        scope.launch { refresh(force = true, at = at) }
     }
 
     /** Point for a map tap; another region's forecast is fetched first. */

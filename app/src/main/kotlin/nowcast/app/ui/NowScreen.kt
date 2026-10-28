@@ -60,6 +60,8 @@ fun NowScreen(state: UiState, now: Instant, view: NowView, onView: (NowView) -> 
                     "Add your MeteoGate ORD API key in Settings to load the radar, or use Open-Meteo's forecast " +
                         "models instead: free, no key, anywhere in the world, but model output rather than radar.",
                     "Open settings", onOpenSettings, "Use Open-Meteo", onUseOpenMeteo)
+                p == null && state.problem is Problem.Outside -> ProblemCard(Icons.Outlined.Public,
+                    "Home is outside ${state.problem.region}", problemText(state.problem), "Open settings", onOpenSettings)
                 p == null && state.problem != null -> ProblemCard(Icons.Outlined.CloudOff, "No forecast yet",
                     problemText(state.problem), "Try again", onRefresh)
                 p == null || issued == null -> Skeleton()
@@ -261,6 +263,8 @@ fun problemText(p: Problem?): String = when (p) {
     is Problem.Network -> "No network"
     is Problem.Radar -> p.msg
     Problem.NoKey -> "No radar key"
+    is Problem.Outside -> "${p.region} is picked as the region in Settings, so the map shows ${p.region}. " +
+        "Home is outside it: pick Automatic there, or a region that contains home, for the forecast here."
     null -> ""
 }
 

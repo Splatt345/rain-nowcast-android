@@ -8,6 +8,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.Home
+import androidx.compose.material.icons.outlined.Memory
 import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.material.icons.outlined.Pause
@@ -22,6 +23,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
@@ -34,6 +36,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import nowcast.app.ModelStore
 import nowcast.app.NowcastSource
 import nowcast.app.Repo
 import nowcast.app.UiState
@@ -128,9 +131,12 @@ fun MapScreen(repo: Repo, state: UiState, now: Instant) {
     }
     // camera: frame the region once per region
     val regionId = frames?.regionId
+    val density = LocalDensity.current
     LaunchedEffect(map, regionId) {
         val m = map ?: return@LaunchedEffect; val b = frames?.bbox ?: return@LaunchedEffect
-        m.moveCamera(CameraUpdateFactory.newLatLngBounds(LatLngBounds.from(b[3], b[2], b[1], b[0]), 40))
+        // the region in the part of the map left visible: under the top buttons, above the time panel
+        val px = { dp: Int -> (dp * density.density).toInt() }
+        m.moveCamera(CameraUpdateFactory.newLatLngBounds(LatLngBounds.from(b[3], b[2], b[1], b[0]), px(12), px(72), px(12), px(236)))
     }
     // overlay
     val lut = remember(settings.palette, settings.radarColors) { settings.radarLut() }
@@ -168,15 +174,19 @@ fun MapScreen(repo: Repo, state: UiState, now: Instant) {
         Text(MAP_CREDIT, style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.align(Alignment.TopStart).statusBarsPadding().padding(8.dp)
                 .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.8f), RoundedCornerShape(6.dp)).padding(horizontal = 6.dp, vertical = 2.dp))
-        PalettePicker(settings.palette, settings.radarColors, { p -> repo.updateLook { it.copy(palette = p) } },
-            { c -> repo.updateLook { it.copy(palette = Render.CUSTOM, radarColors = c) } },
-            Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(8.dp))
+        Column(Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            PalettePicker(settings.palette, settings.radarColors, { p -> repo.updateLook { it.copy(palette = p) } },
+                { c -> repo.updateLook { it.copy(palette = Render.CUSTOM, radarColors = c) } }, Modifier)
+            ModelPicker(repo, frames?.regionId ?: state.forecast?.region?.id)
+        }
 
         val f = frames
         Surface(Modifier.align(Alignment.BottomCenter).padding(12.dp).widthIn(max = 640.dp).fillMaxWidth(),
             shape = RoundedCornerShape(28.dp), color = MaterialTheme.colorScheme.surfaceContainer.copy(alpha = 0.96f),
             shadowElevation = 6.dp) {
             Column(Modifier.padding(start = 8.dp, end = 18.dp, top = 8.dp, bottom = 10.dp)) {
+                // a model swap or refresh re-running the forecast
+                if (state.loading && f != null) LinearProgressIndicator(Modifier.fillMaxWidth().padding(start = 10.dp, bottom = 6.dp))
                 if (fc == null && f == null && (!repo.hasKey || settings.nowcastSource == NowcastSource.OPEN_METEO)) {
                     Text(if (!repo.hasKey) "The radar map needs a MeteoGate key (Settings). The Now screen and widgets use Open-Meteo without one."
                         else "Open-Meteo mode loads no radar for home. Tap a place in Europe to load the radar there.",
@@ -203,7 +213,9 @@ fun MapScreen(repo: Repo, state: UiState, now: Instant) {
                                     Modifier.padding(bottom = 3.dp), style = MaterialTheme.typography.bodyMedium,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
-                            Text(if (future) "Forecast" else "Radar", style = MaterialTheme.typography.labelMedium,
+                            val by = state.forecast?.takeIf { it.region.id == f.regionId }
+                                ?.let { if (it.modelUsed) " · ${it.region.model.removeSuffix(".onnx")}" else " · ensemble only" } ?: ""
+                            Text(if (future) "Forecast$by" else "Radar", style = MaterialTheme.typography.labelMedium,
                                 color = if (future) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         RateLegend(lut)
@@ -274,6 +286,48 @@ private fun PalettePicker(current: String, custom: List<Int>, onPick: (String) -
             HorizontalDivider()
             DropdownMenuItem({ Text("Edit custom colours…") }, { open = false; editing = true },
                 leadingIcon = { Icon(Icons.Outlined.Edit, null) })
+        }
+    }
+}
+
+/** Swap the nowcast model for the region on the map, live: the forecast re-runs on the radar already in. */
+@Composable
+private fun ModelPicker(repo: Repo, regionId: String?) {
+    val settings by repo.prefs.settings.collectAsState()
+    val regions by repo.regionStore.regions.collectAsState()
+    val models by repo.modelStore.models.collectAsState()
+    val region = regions.firstOrNull { it.id == regionId } ?: return
+    var open by remember { mutableStateOf(false) }
+    Box {
+        FilledTonalIconButton({ open = true }, Modifier.size(48.dp)) { Icon(Icons.Outlined.Memory, "Nowcast model") }
+        DropdownMenu(open, { open = false }) {
+            Text("Model for ${region.name}", Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            models.forEach { name ->
+                DropdownMenuItem(
+                    text = {
+                        Column {
+                            Text(name.removeSuffix(".onnx"))
+                            if (name == ModelStore.BUNDLED) Text("bundled · trained on Belgium", style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                    },
+                    trailingIcon = { if (settings.useModel && region.model == name) RadioButton(true, null) },
+                    onClick = { repo.setModel(name); open = false },
+                )
+            }
+            HorizontalDivider()
+            DropdownMenuItem(
+                text = {
+                    Column {
+                        Text("Ensemble only")
+                        Text("motion extrapolation, no ML", style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                },
+                trailingIcon = { if (!settings.useModel) RadioButton(true, null) },
+                onClick = { repo.setModel(null); open = false },
+            )
         }
     }
 }
