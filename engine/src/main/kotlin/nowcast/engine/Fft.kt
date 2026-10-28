@@ -32,13 +32,14 @@ class Fft(val n: Int) {
 
     /** out = DFT(in), in read at inOff + j*inStride. */
     fun transform(inRe: DoubleArray, inIm: DoubleArray, inOff: Int, inStride: Int,
-                  outRe: DoubleArray, outIm: DoubleArray, inverse: Boolean) {
+                  outRe: DoubleArray, outIm: DoubleArray, inverse: Boolean, sc: DoubleArray = scratch()) {
         if (n == 1) { outRe[0] = inRe[inOff]; outIm[0] = inIm[inOff]; return }
-        val sc = DoubleArray(4 * maxP)
         work(outRe, outIm, 0, inRe, inIm, inOff, 1, inStride, 0, inverse, sc)
     }
 
     private val maxP = (0 until factors.size step 2).maxOf { factors[it] }
+    /** [transform]'s scratch; pass one in to reuse it across calls. */
+    fun scratch() = DoubleArray(4 * maxP)
 
     private fun work(oRe: DoubleArray, oIm: DoubleArray, oOff: Int, fRe: DoubleArray, fIm: DoubleArray,
                      fOff: Int, fstride: Int, inStride: Int, fi: Int, inv: Boolean, sc: DoubleArray) {
@@ -94,6 +95,13 @@ class Fft(val n: Int) {
         }
     }
 
+    /** X[q1] = s0 + T + iU, X[p-q1] = s0 + T - iU */
+    @Suppress("NOTHING_TO_INLINE")
+    private inline fun out(re: DoubleArray, im: DoubleArray, o: Int, m: Int, p: Int, q1: Int, tr: Double, ti: Double, ur: Double, ui: Double) {
+        re[o + q1 * m] = tr - ui; im[o + q1 * m] = ti + ur
+        re[o + (p - q1) * m] = tr + ui; im[o + (p - q1) * m] = ti - ur
+    }
+
     /** Odd radix (the factoriser takes every 2 first): twiddle the inputs, then a p-point DFT
      *  that pairs q with p-q, whose weights are conjugate - a quarter of the generic multiplies. */
     private fun bflyOdd(re: DoubleArray, im: DoubleArray, off: Int, fstride: Int, p: Int, m: Int, inv: Boolean, sc: DoubleArray) {
@@ -116,7 +124,38 @@ class Fft(val n: Int) {
                 sc[2 * p + p - q] = ar; sc[3 * p + p - q] = ai                                // a_q
                 x0r += ar; x0i += ai
             }
-            for (q1 in 1..hp) {
+            // Four outputs per pass: each sum is the same chain, but four chains hide the adds' latency
+            // (a 191-point radix is most of a 382-row FFT).
+            var q1 = 1
+            while (q1 + 3 <= hp) {
+                var tr0 = sr[0]; var ti0 = si[p]; var ur0 = 0.0; var ui0 = 0.0
+                var tr1 = sr[0]; var ti1 = si[p]; var ur1 = 0.0; var ui1 = 0.0
+                var tr2 = sr[0]; var ti2 = si[p]; var ur2 = 0.0; var ui2 = 0.0
+                var tr3 = sr[0]; var ti3 = si[p]; var ur3 = 0.0; var ui3 = 0.0
+                var t0 = 0; var t1 = 0; var t2 = 0; var t3 = 0
+                val d0 = q1 * step; val d1 = d0 + step; val d2 = d1 + step; val d3 = d2 + step
+                for (q in 1..hp) {
+                    t0 += d0; if (t0 >= n) t0 -= n
+                    t1 += d1; if (t1 >= n) t1 -= n
+                    t2 += d2; if (t2 >= n) t2 -= n
+                    t3 += d3; if (t3 >= n) t3 -= n
+                    val ar = sc[2 * p + p - q]; val ai = sc[3 * p + p - q]; val br = sc[2 * p + q]; val bi = sc[3 * p + q]
+                    var wr = twr[t0]; var wi = sg * twi[t0]
+                    tr0 += ar * wr; ti0 += ai * wr; ur0 += br * wi; ui0 += bi * wi
+                    wr = twr[t1]; wi = sg * twi[t1]
+                    tr1 += ar * wr; ti1 += ai * wr; ur1 += br * wi; ui1 += bi * wi
+                    wr = twr[t2]; wi = sg * twi[t2]
+                    tr2 += ar * wr; ti2 += ai * wr; ur2 += br * wi; ui2 += bi * wi
+                    wr = twr[t3]; wi = sg * twi[t3]
+                    tr3 += ar * wr; ti3 += ai * wr; ur3 += br * wi; ui3 += bi * wi
+                }
+                out(re, im, off + u, m, p, q1, tr0, ti0, ur0, ui0)
+                out(re, im, off + u, m, p, q1 + 1, tr1, ti1, ur1, ui1)
+                out(re, im, off + u, m, p, q1 + 2, tr2, ti2, ur2, ui2)
+                out(re, im, off + u, m, p, q1 + 3, tr3, ti3, ur3, ui3)
+                q1 += 4
+            }
+            while (q1 <= hp) {
                 var tr = sr[0]; var ti = si[p]; var ur = 0.0; var ui = 0.0
                 var t = 0
                 for (q in 1..hp) {
@@ -125,9 +164,8 @@ class Fft(val n: Int) {
                     tr += sc[2 * p + p - q] * wr; ti += sc[3 * p + p - q] * wr
                     ur += sc[2 * p + q] * wi; ui += sc[3 * p + q] * wi
                 }
-                // X[q1] = s0 + T + iU, X[p-q1] = s0 + T - iU
-                re[off + u + q1 * m] = tr - ui; im[off + u + q1 * m] = ti + ur
-                re[off + u + (p - q1) * m] = tr + ui; im[off + u + (p - q1) * m] = ti - ur
+                out(re, im, off + u, m, p, q1, tr, ti, ur, ui)
+                q1++
             }
             re[off + u] = x0r; im[off + u] = x0i
         }
@@ -149,16 +187,16 @@ class Fft2(val h: Int, val w: Int, private val par: Par = Par.SERIAL) {
     /** Rows, then columns; each 1-D transform is independent, so [par] splits them. */
     private fun run(re: DoubleArray, im: DoubleArray, inv: Boolean) {
         par.run(h) { a, b ->
-            val tr = DoubleArray(w); val ti = DoubleArray(w)
+            val tr = DoubleArray(w); val ti = DoubleArray(w); val sc = rows.scratch()
             for (r in a until b) {
-                rows.transform(re, im, r * w, 1, tr, ti, inv)
+                rows.transform(re, im, r * w, 1, tr, ti, inv, sc)
                 System.arraycopy(tr, 0, re, r * w, w); System.arraycopy(ti, 0, im, r * w, w)
             }
         }
         par.run(w) { a, b ->
-            val cr = DoubleArray(h); val ci = DoubleArray(h)
+            val cr = DoubleArray(h); val ci = DoubleArray(h); val sc = cols.scratch()
             for (c in a until b) {
-                cols.transform(re, im, c, w, cr, ci, inv)
+                cols.transform(re, im, c, w, cr, ci, inv, sc)
                 for (r in 0 until h) { re[r * w + c] = cr[r]; im[r * w + c] = ci[r] }
             }
         }
