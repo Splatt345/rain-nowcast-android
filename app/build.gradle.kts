@@ -28,8 +28,12 @@ android {
         }
     }
     buildFeatures { compose = true; buildConfig = true }
-    // one APK per ABI, each with only its own onnxruntime and MapLibre libraries
-    splits { abi { isEnable = true; reset(); include(*ABI_CODES.keys.toTypedArray()); isUniversalApk = false } }
+    // one APK per ABI, each with only its own onnxruntime and MapLibre libraries. Off for an app
+    // bundle (Google Play), which AGP can't build with APK splits and which Play splits by ABI itself.
+    // Play also lists the app as rain.nowcast; F-Droid keeps nowcast.app (fdroid/nowcast.app.yml).
+    val bundle = gradle.startParameter.taskNames.any { it.contains("bundle", ignoreCase = true) }
+    splits { abi { isEnable = !bundle; reset(); include(*ABI_CODES.keys.toTypedArray()); isUniversalApk = false } }
+    defaultConfig { if (bundle) { applicationId = "rain.nowcast"; ndk { abiFilters += ABI_CODES.keys } } }
     // lz4-java's desktop natives (via jHDF): Android loads none of them and falls back to Java
     packaging { resources { excludes += listOf("net/jpountz/util/darwin/**", "net/jpountz/util/windows/**") } }
 }
