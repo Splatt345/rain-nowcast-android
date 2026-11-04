@@ -4,6 +4,7 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import nowcast.engine.forecast.*
 import nowcast.engine.outlook.*
+import nowcast.engine.radar.*
 import nowcast.engine.render.*
 import java.io.DataInputStream
 import java.io.DataOutputStream
@@ -121,6 +122,26 @@ class MapFrames(val levels: List<ByteArray>, val width: Int, val height: Int, va
             return MapFrames(fields.map { Render.levels(it, forecast.geo.rows, forecast.geo.cols, sampler) }, sampler.width, sampler.height, times, forecast.region.bbox,
                 forecast.region.id, forecast.issued, forecast.past.size - 1, Render.rasterMotion(forecast.motion, sampler))
         }
+
+        /** Open-Meteo's model on a coarse grid around home, for the map without a radar key. */
+        fun of(grid: RainGrid): MapFrames = still(OPEN_METEO, grid.fields, grid.rows, grid.cols, grid.times, grid.bbox, grid.issued,
+            grid.times.indexOfLast { it <= grid.issued }.coerceAtLeast(0), Render.gridSampler(grid.bbox, grid.rows, grid.cols, width = 512))
+
+        /** DWD's radar and nowcast around home, for the map without a radar key. */
+        fun of(clip: RadarClip): MapFrames = still(DWD, clip.fields, clip.rows, clip.cols, clip.times, clip.bbox, clip.issued, clip.newest,
+            Render.sampler(clip.bbox, 512, clip::cell))
+
+        /** Frames without a motion field: cross-faded between steps rather than moved. */
+        private fun still(id: String, fields: List<FloatArray>, rows: Int, cols: Int, times: List<Instant>, bbox: List<Double>, issued: Instant,
+                          newest: Int, sampler: Render.Sampler): MapFrames {
+            val nodeCols = (sampler.width - 1) / 8 + 2; val nodeRows = (sampler.height - 1) / 8 + 2
+            return MapFrames(fields.map { Render.levels(it, rows, cols, sampler) }, sampler.width, sampler.height, times, bbox, id, issued, newest,
+                Render.RasterMotion(nodeCols, nodeRows, 8, FloatArray(nodeCols * nodeRows), FloatArray(nodeCols * nodeRows)))
+        }
+
+        /** [regionId]s of the keyless maps: no radar region. */
+        const val OPEN_METEO = "open-meteo"
+        const val DWD = "dwd"
 
         private const val FILE = "map.bin"
         private const val VERSION = 2

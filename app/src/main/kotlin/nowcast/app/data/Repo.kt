@@ -121,7 +121,7 @@ class Repo(private val ctx: Context) {
     suspend fun refresh(force: Boolean = false, at: Pair<Double, Double>? = null) = lock.withLock {
         if (at == null) follow()
         val settings = prefs.value
-        if (openMeteo && at == null) { refreshOpenMeteo(settings); return@withLock }
+        if (openMeteo && at == null) { refreshOpenMeteo(settings); refreshGrid(settings); return@withLock }
         val key = secrets.get(SOURCE_OPERA)
         // Open-Meteo users without a key: the map has no radar, which is not a problem for the Now screen
         if (key == null) { if (!openMeteo) flow.update { it.copy(problem = Problem.NoKey, loading = false) }; return@withLock }
@@ -198,6 +198,31 @@ class Repo(private val ctx: Context) {
         refreshOutlook(settings)
         publishPoint(full = true)
         save()
+    }
+
+    /** When and where the keyless map was last fetched, and how long it holds: 5 min for DWD, 15 for Open-Meteo. */
+    private var keylessFetched: Triple<Instant, Pair<Double, Double>, Long>? = null
+
+    /**
+     * The map without a radar key: DWD's radar and nowcast (Bright Sky) where it covers home, else Open-Meteo's
+     * model grid (each of its points is a call of the free quota, hence the quarter hour).
+     */
+    private suspend fun refreshGrid(settings: Settings) {
+        val home = settings.home
+        keylessFetched?.let { (at, where, minutes) -> if (where == home && Duration.between(at, Instant.now()).toMinutes() < minutes) return }
+        try {
+            val drawn = withContext(Dispatchers.IO) {
+                BrightSky.fetch(home.first, home.second)?.let(MapFrames::of)
+                    ?: MapFrames.of(OpenMeteoNowcast.fetchGrid(home.first, home.second, secrets.get(SOURCE_OPEN_METEO)))
+            }
+            keylessFetched = Triple(Instant.now(), home, if (drawn.regionId == MapFrames.DWD) 5L else 15L)
+            framesFor = null; frameFlow.value = drawn
+            withContext(Dispatchers.IO) { runCatching { MapFrames.write(ctx.filesDir, drawn) } }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            // ponytail: a failed map keeps the last one; the Now screen already shows the network problem
+        }
     }
 
     private suspend fun publishPoint(full: Boolean) {
@@ -304,6 +329,9 @@ class Repo(private val ctx: Context) {
      * in the Repo's scope, so closing the sheet does not cancel a run that has already dropped the old one.
      */
     suspend fun pointAt(lat: Double, lon: Double): Pair<PointForecast, Instant>? {
+        if (openMeteo && !hasKey) return try {
+            withContext(Dispatchers.IO) { OpenMeteoNowcast.fetch(lat, lon, secrets.get(SOURCE_OPEN_METEO)) }
+        } catch (e: CancellationException) { throw e } catch (e: Exception) { null }
         val current = flow.value.forecast
         if (current == null || !current.region.contains(lat, lon)) scope.async { refresh(at = lat to lon) }.await()
         val latest = flow.value.forecast ?: return null

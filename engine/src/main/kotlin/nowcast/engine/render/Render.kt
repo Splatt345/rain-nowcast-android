@@ -80,7 +80,18 @@ object Render {
     private fun mercY(lat: Double) = R_EARTH * ln(tan(PI / 4 + Math.toRadians(lat) / 2))
 
     /** render.mercator_sampler: source (row, col) for each pixel of a Mercator raster over bbox. */
-    fun mercatorSampler(geo: GridGeo, bbox: List<Double>, width: Int = 640): Sampler {
+    fun mercatorSampler(geo: GridGeo, bbox: List<Double>, width: Int = 640): Sampler = sampler(bbox, width) { lat, lon ->
+        val (laeaX, laeaY) = geo.laea.forward(lat, lon)
+        (geo.top - laeaY) / geo.pixelHeight to (laeaX - geo.left) / geo.pixelWidth
+    }
+
+    /** The same raster over a regular lat/lon grid spanning [bbox] corner point to corner point, row 0 north. */
+    fun gridSampler(bbox: List<Double>, rows: Int, cols: Int, width: Int = 640): Sampler = sampler(bbox, width) { lat, lon ->
+        (bbox[3] - lat) / (bbox[3] - bbox[1]) * (rows - 1) to (lon - bbox[0]) / (bbox[2] - bbox[0]) * (cols - 1)
+    }
+
+    /** A Mercator raster over [bbox] sampling any grid: [source] gives a place's (row, col) in it. */
+    fun sampler(bbox: List<Double>, width: Int, source: (Double, Double) -> Pair<Double, Double>): Sampler {
         val (west, south, east, north) = bbox
         val mercWest = R_EARTH * Math.toRadians(west); val mercEast = R_EARTH * Math.toRadians(east)
         val mercSouth = mercY(south); val mercNorth = mercY(north)
@@ -91,9 +102,8 @@ object Render {
             val lat = Math.toDegrees(atan(sinh(northing / R_EARTH)))
             for (x in 0 until width) {
                 val easting = if (width == 1) mercWest else mercWest + (mercEast - mercWest) * x / (width - 1)
-                val (laeaX, laeaY) = geo.laea.forward(lat, Math.toDegrees(easting / R_EARTH))
-                cols[y * width + x] = (laeaX - geo.left) / geo.pixelWidth
-                rows[y * width + x] = (geo.top - laeaY) / geo.pixelHeight
+                val (row, col) = source(lat, Math.toDegrees(easting / R_EARTH))
+                rows[y * width + x] = row; cols[y * width + x] = col
             }
         }
         return Sampler(rows, cols, width, height)

@@ -97,7 +97,7 @@ fun MapTimeline(frames: MapFrames, minute: Int, onMinute: (Int) -> Unit, point: 
 
         drawRoundRect(colors.onSurface.copy(alpha = 0.05f), Offset(left, top), Size(split - left, bottom - top), CornerRadius(6.dp.toPx()))
         drawRoundRect(colors.primary.copy(alpha = 0.10f), Offset(split, top), Size(right - split, bottom - top), CornerRadius(6.dp.toPx()))
-        drawText(measurer, "RADAR", Offset(left + 6.dp.toPx(), top + 3.dp.toPx()), labelStyle)
+        drawText(measurer, if (frames.regionId == MapFrames.OPEN_METEO) "MODEL" else "RADAR", Offset(left + 6.dp.toPx(), top + 3.dp.toPx()), labelStyle)
         drawText(measurer, "FORECAST", Offset(split + 6.dp.toPx(), top + 3.dp.toPx()), labelStyle.copy(color = colors.primary))
 
         if (homeCurve.isNotEmpty()) {

@@ -40,4 +40,22 @@ class OpenMeteoNowcastTest {
         val paid = OpenMeteoNowcast.url(50.85, 4.35, "k")
         assertTrue(paid.startsWith("https://customer-api.open-meteo.com/")); assertTrue(paid.endsWith("&apikey=k"))
     }
+    @Test fun aGridBecomesFieldsAroundNow() {
+        val n = OpenMeteoNowcast.GRID * OpenMeteoNowcast.GRID
+        // 10:00 .. 14:00 every 15 min; point 0 (north-west corner) has 0.5 mm in the quarter ending 12:15, the rest is dry
+        val ends = (0..16).map { "\"2026-10-28T%02d:%02d\"".format(10 + it * 15 / 60, it * 15 % 60) }
+        val points = (0 until n).joinToString(",", "[", "]") { point ->
+            val rain = ends.indices.map { if (point == 0 && it == 9) 0.5 else 0.0 }
+            """{"minutely_15":{"time":[${ends.joinToString(",")}],"precipitation":[${rain.joinToString(",")}]}}"""
+        }
+        val grid = OpenMeteoNowcast.parseGrid(points, OpenMeteoNowcast.gridBbox(50.0, 4.0), Instant.parse("2026-10-28T12:07:00Z"))
+        val issued = Instant.parse("2026-10-28T12:00:00Z")
+        assertEquals(issued, grid.issued)
+        // quarters ending after PAST_MIN before and up to AHEAD_MIN after the issue time, each timed at its middle
+        assertEquals(issued.minusSeconds(60L * OpenMeteoNowcast.PAST_MIN - 450), grid.times.first())
+        assertEquals(issued.plusSeconds(60L * OpenMeteoNowcast.AHEAD_MIN - 450), grid.times.last())
+        val wet = grid.times.indexOf(Instant.parse("2026-10-28T12:07:30Z"))
+        assertEquals(2.0f, grid.fields[wet][0], 1e-6f); assertEquals(0.0f, grid.fields[wet][1], 0f)
+        assertTrue(grid.bbox[0] < 4.0 && grid.bbox[2] > 4.0 && grid.bbox[1] < 50.0 && grid.bbox[3] > 50.0)
+    }
 }

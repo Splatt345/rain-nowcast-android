@@ -65,6 +65,8 @@ fun mapStyle(dark: Boolean): Style.Builder =
     Style.Builder().fromUri("https://tiles.openfreemap.org/styles/" + if (dark) "dark" else "positron")
 
 const val MAP_CREDIT = "OpenFreeMap © OpenMapTiles Data from OpenStreetMap"
+const val MAP_CREDIT_OPEN_METEO = "$MAP_CREDIT · Rain: Open-Meteo.com"
+const val MAP_CREDIT_DWD = "$MAP_CREDIT · DWD via Bright Sky"
 
 /** The app's own light/dark (Settings can force one), not the system's. */
 @Composable
@@ -178,8 +180,8 @@ fun MapScreen(repo: Repo, state: UiState, now: Instant) {
 
     Box(Modifier.fillMaxSize()) {
         AndroidView({ mapView }, Modifier.fillMaxSize().semantics { contentDescription = "Rain map. Tap a place for its forecast." })
-        Text(MAP_CREDIT, style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.align(Alignment.TopStart).statusBarsPadding().padding(8.dp)
+        Text(when (frames?.regionId) { MapFrames.OPEN_METEO -> MAP_CREDIT_OPEN_METEO; MapFrames.DWD -> MAP_CREDIT_DWD; else -> MAP_CREDIT }, style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.align(Alignment.TopStart).statusBarsPadding().padding(8.dp).padding(end = 56.dp)      // clear of the buttons on the right
                 .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.8f), RoundedCornerShape(6.dp)).padding(horizontal = 6.dp, vertical = 2.dp))
         Column(Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             PalettePicker(settings.palette, settings.radarColors, { chosen -> repo.updateLook { it.copy(palette = chosen) } },
@@ -194,14 +196,14 @@ fun MapScreen(repo: Repo, state: UiState, now: Instant) {
             Column(Modifier.padding(start = 8.dp, end = 18.dp, top = 8.dp, bottom = 10.dp)) {
                 // a model swap or refresh re-running the forecast
                 if (state.loading && shownFrames != null) LinearProgressIndicator(Modifier.fillMaxWidth().padding(start = 10.dp, bottom = 6.dp))
-                if (forecast == null && shownFrames == null && (!repo.hasKey || settings.nowcastSource == NowcastSource.OPEN_METEO)) {
-                    Text(if (!repo.hasKey) "The radar map needs a MeteoGate key (Settings). The Now screen and widgets use Open-Meteo without one."
-                        else "Open-Meteo mode loads no radar for home. Tap a place in Europe to load the radar there.",
+                if (forecast == null && shownFrames == null && !repo.canRun) {
+                    Text("The radar map needs a MeteoGate key (Settings). The Now screen and widgets use Open-Meteo without one.",
                         Modifier.padding(12.dp), style = MaterialTheme.typography.bodyMedium)
                 } else if (shownFrames == null || minute !in 0..shownFrames.minutes) {
                     Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
                         CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp); Spacer(Modifier.width(12.dp))
-                        Text(if (forecast == null) "Waiting for the radar…" else "Drawing the forecast…")
+                        Text(if (settings.nowcastSource == NowcastSource.OPEN_METEO && forecast == null) "Loading the map…"
+                            else if (forecast == null) "Waiting for the radar…" else "Drawing the forecast…")
                     }
                 } else {
                     val time = shownFrames.time(minute)
@@ -221,8 +223,10 @@ fun MapScreen(repo: Repo, state: UiState, now: Instant) {
                                     color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                             val modelLabel = state.forecast?.takeIf { it.region.id == shownFrames.regionId }
-                                ?.let { if (it.modelUsed) " · ${it.region.model.removeSuffix(".onnx")}" else " · ensemble only" } ?: ""
-                            Text(if (future) "Forecast$modelLabel" else "Radar", style = MaterialTheme.typography.labelMedium,
+                                ?.let { if (it.modelUsed) " · ${it.region.model.removeSuffix(".onnx")}" else " · ensemble only" }
+                                ?: if (shownFrames.regionId == MapFrames.DWD) " · DWD" else ""
+                            val modelOnly = shownFrames.regionId == MapFrames.OPEN_METEO
+                            Text(if (modelOnly) "Open-Meteo model · ${if (future) "forecast" else "earlier"}" else if (future) "Forecast$modelLabel" else "Radar", style = MaterialTheme.typography.labelMedium,
                                 color = if (future) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                         RateLegend(lut)

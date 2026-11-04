@@ -67,7 +67,7 @@ fun FirstRun(onKey: (String) -> Unit, onOpenMeteo: () -> Unit) {
                 Text("Get a key at meteogate.eu"); Spacer(Modifier.width(6.dp))
                 Icon(Icons.AutoMirrored.Outlined.OpenInNew, null, Modifier.size(16.dp))
             }
-            TextButton(onOpenMeteo, Modifier.heightIn(min = 48.dp)) { Text("No key? Use Open-Meteo's forecast instead (no radar map)") }
+            TextButton(onOpenMeteo, Modifier.heightIn(min = 48.dp)) { Text("No key? Use Open-Meteo's model forecast instead (map from the model, no radar)") }
         }
     }
 }
