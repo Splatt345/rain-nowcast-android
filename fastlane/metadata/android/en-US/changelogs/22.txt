@@ -1,0 +1,1 @@
+No radar key needed in more countries: the app now picks the best free source for your home, with national radar nowcasts for Belgium, Luxembourg, Austria and Germany, MET Norway in the Nordics, and Open-Meteo's models with moving rain anywhere else. Graphs now run to 90 minutes ahead, and radar rain amounts are corrected against rain gauges.
