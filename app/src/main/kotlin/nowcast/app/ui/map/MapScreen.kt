@@ -34,6 +34,7 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.conflate
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import nowcast.app.data.*
@@ -41,6 +42,9 @@ import nowcast.app.ui.*
 import nowcast.app.ui.now.*
 import nowcast.app.ui.settings.*
 import nowcast.engine.forecast.*
+import nowcast.engine.radar.GeoSphereNowcast
+import nowcast.engine.radar.RmiInca
+import nowcast.engine.radar.boxAround
 import nowcast.engine.render.*
 import org.maplibre.android.camera.CameraUpdateFactory
 import org.maplibre.android.geometry.LatLng
@@ -67,6 +71,8 @@ fun mapStyle(dark: Boolean): Style.Builder =
 const val MAP_CREDIT = "OpenFreeMap © OpenMapTiles Data from OpenStreetMap"
 const val MAP_CREDIT_OPEN_METEO = "$MAP_CREDIT · Rain: Open-Meteo.com"
 const val MAP_CREDIT_DWD = "$MAP_CREDIT · DWD via Bright Sky"
+const val MAP_CREDIT_RMI = "$MAP_CREDIT · Rain: RMI INCA-BE"
+const val MAP_CREDIT_GEOSPHERE = "$MAP_CREDIT · Rain: GeoSphere Austria, CC BY 4.0"
 
 /** The app's own light/dark (Settings can force one), not the system's. */
 @Composable
@@ -140,32 +146,38 @@ fun MapScreen(repo: Repo, state: UiState, now: Instant) {
         style = null                                 // the old one is invalid once the new one loads
         current.setStyle(mapStyle(dark)) { loaded -> style = loaded }
     }
-    // camera: frame the region once per region
-    val regionId = frames?.regionId
+    // camera: frame the region once per region; the keyless maps are boxes around home, so frame home, and a new box
+    // (or none yet) does not move the camera
+    val framed = frames?.takeUnless { it.keyless }?.let { it.regionId to it.bbox } ?: (null to settings.home.let { (lat, lon) -> boxAround(lat, lon) })
     val density = LocalDensity.current
-    LaunchedEffect(map, regionId) {
-        val current = map ?: return@LaunchedEffect; val bbox = frames?.bbox ?: return@LaunchedEffect
+    LaunchedEffect(map, framed) {
+        val current = map ?: return@LaunchedEffect; val bbox = framed.second
         // the region in the part of the map left visible: under the top buttons, above the time panel
         val pixels = { dp: Int -> (dp * density.density).toInt() }
         current.moveCamera(CameraUpdateFactory.newLatLngBounds(LatLngBounds.from(bbox[3], bbox[2], bbox[1], bbox[0]), pixels(12), pixels(72), pixels(12), pixels(236)))
     }
     val lut = remember(settings.palette, settings.radarColors) { settings.radarLut() }
-    LaunchedEffect(style, frames, minute, lut) {
+    // Not keyed on the minute: a frame can take longer than playing's 100 ms, and cancelling does not stop the
+    // drawing, only throw it away. Each run finishes, then the newest minute is taken.
+    LaunchedEffect(style, frames, lut) {
         val loadedStyle = style ?: return@LaunchedEffect; val loaded = frames ?: return@LaunchedEffect
-        if (minute !in 0..loaded.minutes) return@LaunchedEffect
-        val bitmap = withContext(Dispatchers.Default) {
-            Bitmap.createBitmap(Render.argb(loaded.levelsAt(minute), lut), loaded.width, loaded.height, Bitmap.Config.ARGB_8888)
-        }
         val bbox = loaded.bbox
         val quad = LatLngQuad(LatLng(bbox[3], bbox[0]), LatLng(bbox[3], bbox[2]), LatLng(bbox[1], bbox[2]), LatLng(bbox[1], bbox[0]))
-        val source = loadedStyle.getSourceAs<ImageSource>("rain")
-        if (source == null) {
-            loadedStyle.addSource(ImageSource("rain", quad, bitmap))
-            // under the place names, so towns stay readable through the rain
-            val labels = loadedStyle.layers.firstOrNull { it is SymbolLayer }?.id
-            val layer = RasterLayer("rain", "rain").withProperties(rasterFadeDuration(0f), rasterOpacity(0.9f), rasterResampling("linear"))
-            if (labels != null) loadedStyle.addLayerBelow(layer, labels) else loadedStyle.addLayer(layer)
-        } else { source.setCoordinates(quad); source.setImage(bitmap) }
+        loadedStyle.getSourceAs<ImageSource>("rain")?.setCoordinates(quad)
+        snapshotFlow { minute }.conflate().collect { shown ->
+            if (shown !in 0..loaded.minutes) return@collect
+            val bitmap = withContext(Dispatchers.Default) {
+                Bitmap.createBitmap(Render.argb(loaded.levelsAt(shown), lut), loaded.width, loaded.height, Bitmap.Config.ARGB_8888)
+            }
+            val source = loadedStyle.getSourceAs<ImageSource>("rain")
+            if (source == null) {
+                loadedStyle.addSource(ImageSource("rain", quad, bitmap))
+                // under the place names, so towns stay readable through the rain
+                val labels = loadedStyle.layers.firstOrNull { it is SymbolLayer }?.id
+                val layer = RasterLayer("rain", "rain").withProperties(rasterFadeDuration(0f), rasterOpacity(0.9f), rasterResampling("linear"))
+                if (labels != null) loadedStyle.addLayerBelow(layer, labels) else loadedStyle.addLayer(layer)
+            } else source.setImage(bitmap)
+        }
     }
     LaunchedEffect(style, settings.home) {
         val loadedStyle = style ?: return@LaunchedEffect
@@ -180,7 +192,8 @@ fun MapScreen(repo: Repo, state: UiState, now: Instant) {
 
     Box(Modifier.fillMaxSize()) {
         AndroidView({ mapView }, Modifier.fillMaxSize().semantics { contentDescription = "Rain map. Tap a place for its forecast." })
-        Text(when (frames?.regionId) { MapFrames.OPEN_METEO -> MAP_CREDIT_OPEN_METEO; MapFrames.DWD -> MAP_CREDIT_DWD; else -> MAP_CREDIT }, style = MaterialTheme.typography.labelSmall,
+        Text(when (frames?.regionId) { MapFrames.OPEN_METEO -> MAP_CREDIT_OPEN_METEO; MapFrames.DWD -> MAP_CREDIT_DWD
+            RmiInca.SOURCE -> MAP_CREDIT_RMI; GeoSphereNowcast.SOURCE -> MAP_CREDIT_GEOSPHERE; else -> MAP_CREDIT }, style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurface, modifier = Modifier.align(Alignment.TopStart).statusBarsPadding().padding(8.dp).padding(end = 56.dp)      // clear of the buttons on the right
                 .background(MaterialTheme.colorScheme.surface.copy(alpha = 0.8f), RoundedCornerShape(6.dp)).padding(horizontal = 6.dp, vertical = 2.dp))
         Column(Modifier.align(Alignment.TopEnd).statusBarsPadding().padding(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -224,7 +237,7 @@ fun MapScreen(repo: Repo, state: UiState, now: Instant) {
                             }
                             val modelLabel = state.forecast?.takeIf { it.region.id == shownFrames.regionId }
                                 ?.let { if (it.modelUsed) " · ${it.region.model.removeSuffix(".onnx")}" else " · ensemble only" }
-                                ?: if (shownFrames.regionId == MapFrames.DWD) " · DWD" else ""
+                                ?: when (shownFrames.regionId) { MapFrames.DWD -> " · DWD"; RmiInca.SOURCE -> " · RMI"; GeoSphereNowcast.SOURCE -> " · GeoSphere"; else -> "" }
                             val modelOnly = shownFrames.regionId == MapFrames.OPEN_METEO
                             Text(if (modelOnly) "Open-Meteo model · ${if (future) "forecast" else "earlier"}" else if (future) "Forecast$modelLabel" else "Radar", style = MaterialTheme.typography.labelMedium,
                                 color = if (future) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant)

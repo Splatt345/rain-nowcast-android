@@ -54,4 +54,11 @@ class PointTest {
             summary(minutes, dry, maybe, 0))
         assertEquals("No current forecast: the newest radar is 60 min old", summary(minutes, dry, p0, 60))
     }
+
+    @Test fun gaugeCorrectedLightRainIsStillRain() {
+        val minutes = IntArray(61) { it }
+        val light = DoubleArray(61) { 0.03 }; val sure = DoubleArray(61) { 1.0 }
+        assertTrue(summary(minutes, light, sure, 0, RADAR_WET).startsWith("Raining now, <0.1 mm/h"))
+        assertTrue(summary(minutes, light, DoubleArray(61), 0).startsWith("Dry"))       // default line unchanged
+    }
 }

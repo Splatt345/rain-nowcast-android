@@ -1,11 +1,13 @@
 package nowcast.app.data
 
 import android.content.Context
+import android.util.Log
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.update
@@ -43,9 +45,9 @@ data class UiState(
     val updated: Instant? = null,
     /** The region a running cycle is for, so the header is right before the first forecast. */
     val regionName: String? = null,
-    /** What [point]'s minutes count from: the radar frame, or the Open-Meteo quarter hour. */
+    /** What [point]'s minutes count from: the radar frame, or the keyless source's own issue time. */
     val issued: Instant? = null,
-    /** [point] is Open-Meteo model output, not radar. */
+    /** [point] is from a keyless source ([regionName]), not the radar cycle. */
     val modelOnly: Boolean = false,
 )
 
@@ -70,7 +72,9 @@ class Repo(private val ctx: Context) {
 
     init {
         scope.launch(Dispatchers.IO) {
+            val (lat, lon) = prefs.value.home
             val restored = MapFrames.read(ctx.filesDir)?.takeIf { Duration.between(it.issued, Instant.now()).toHours() < 3 }
+                ?.takeUnless { it.keyless && !it.covers(lat, lon) }         // another home's box
             frameFlow.compareAndSet(null, restored)
         }
     }
@@ -121,7 +125,8 @@ class Repo(private val ctx: Context) {
     suspend fun refresh(force: Boolean = false, at: Pair<Double, Double>? = null) = lock.withLock {
         if (at == null) follow()
         val settings = prefs.value
-        if (openMeteo && at == null) { refreshOpenMeteo(settings); refreshGrid(settings); return@withLock }
+        if (openMeteo && at == null) { refreshKeyless(settings); return@withLock }
+        if (!openMeteo) keylessMap = null          // its fields are megabytes, and the radar run needs the heap
         val key = secrets.get(SOURCE_OPERA)
         // Open-Meteo users without a key: the map has no radar, which is not a problem for the Now screen
         if (key == null) { if (!openMeteo) flow.update { it.copy(problem = Problem.NoKey, loading = false) }; return@withLock }
@@ -180,12 +185,27 @@ class Repo(private val ctx: Context) {
         runCatching { Saved.write(ctx.filesDir, Saved.of(flow.value, prefs.value.home)) }
     }
 
-    /** The Now screen, widgets and alert from Open-Meteo: one small request, no radar, no key needed. */
-    private suspend fun refreshOpenMeteo(settings: Settings) {
-        flow.update { it.copy(loading = true, regionName = Snapshot.SOURCE_OPEN_METEO) }
+    /**
+     * Home's curve first (one small request), then the map, which takes seconds; with a new map, the curve again,
+     * as it may now come from the map. In the background ([draw] false) the map is read for the curve, not drawn.
+     */
+    private suspend fun refreshKeyless(settings: Settings, draw: Boolean = true) {
+        val (lat, lon) = settings.home
+        // another home's map: the curve would come from it
+        frameFlow.value?.takeIf { it.keyless && !it.covers(lat, lon) }?.let { frameFlow.value = null; keylessMap = null }
+        refreshCurve(settings)
+        val fresh = coroutineScope { launch { refreshOutlook(settings) }; refreshGrid(settings, draw) }
+        if (fresh) refreshCurve(settings)
+        publishPoint(full = true)
+        save()
+    }
+
+    /** The Now screen's curve, without a key: see [keylessPoint]. */
+    private suspend fun refreshCurve(settings: Settings) {
+        flow.update { it.copy(loading = true) }
         try {
-            val (nowcast, issued) = withContext(Dispatchers.IO) { OpenMeteoNowcast.fetch(settings.home.first, settings.home.second, secrets.get(SOURCE_OPEN_METEO)) }
-            flow.update { it.copy(point = nowcast, issued = issued, modelOnly = true, problem = null, modelNote = null, updated = Instant.now()) }
+            val (nowcast, issued, name) = withContext(Dispatchers.IO) { keylessPoint(settings.home.first, settings.home.second) }
+            flow.update { it.copy(point = nowcast, issued = issued, regionName = name, modelOnly = true, problem = null, modelNote = null, updated = Instant.now()) }
         } catch (e: CancellationException) {
             throw e
         } catch (e: IOException) {
@@ -195,33 +215,55 @@ class Repo(private val ctx: Context) {
         } finally {
             flow.update { it.copy(loading = false) }
         }
-        refreshOutlook(settings)
-        publishPoint(full = true)
-        save()
     }
 
-    /** When and where the keyless map was last fetched, and how long it holds: 5 min for DWD, 15 for Open-Meteo. */
+    /**
+     * The keyless point, with its source's name: what the map shows there, so the curve and the map agree; but
+     * MET Norway's radar nowcast where the map is only a model. Open-Meteo's API where the map does not reach.
+     */
+    private fun keylessPoint(lat: Double, lon: Double): Triple<PointForecast, Instant, String> {
+        val (sample, name) = keylessMap ?: (null to "")
+        fun onMap() = sample?.invoke(lat, lon)?.let { (point, issued) -> Triple(point, issued, name) }
+        if (name != Snapshot.SOURCE_OPEN_METEO) onMap()?.let { return it }
+        runCatching { MetNorwayNowcast.fetch(lat, lon) }.getOrNull()?.let { (point, issued) -> return Triple(point, issued, MetNorwayNowcast.NAME) }
+        return onMap() ?: OpenMeteoNowcast.fetch(lat, lon, secrets.get(SOURCE_OPEN_METEO)).let { (point, issued) -> Triple(point, issued, Snapshot.SOURCE_OPEN_METEO) }
+    }
+
+    /** The keyless map's rain at a place, and its source's name; set with the map. */
+    private var keylessMap: Pair<(Double, Double) -> Pair<PointForecast, Instant>?, String>? = null
+
+    /** When and where the keyless map was last fetched, and how long it holds: as often as its source updates. */
     private var keylessFetched: Triple<Instant, Pair<Double, Double>, Long>? = null
 
     /**
-     * The map without a radar key: DWD's radar and nowcast (Bright Sky) where it covers home, else Open-Meteo's
-     * model grid (each of its points is a call of the free quota, hence the quarter hour).
+     * The map without a radar key: the best national radar nowcast for home ([keylessRadar]), else Open-Meteo's
+     * model on its own grid ([OpenMeteoMap]), else their API on a coarse grid (each point a call of the free quota).
      */
-    private suspend fun refreshGrid(settings: Settings) {
+    private suspend fun refreshGrid(settings: Settings, draw: Boolean): Boolean {
         val home = settings.home
-        keylessFetched?.let { (at, where, minutes) -> if (where == home && Duration.between(at, Instant.now()).toMinutes() < minutes) return }
+        keylessFetched?.let { (at, where, minutes) -> if (where == home && Duration.between(at, Instant.now()).toMinutes() < minutes) return false }
         try {
             val drawn = withContext(Dispatchers.IO) {
-                BrightSky.fetch(home.first, home.second)?.let(MapFrames::of)
-                    ?: MapFrames.of(OpenMeteoNowcast.fetchGrid(home.first, home.second, secrets.get(SOURCE_OPEN_METEO)))
-            }
-            keylessFetched = Triple(Instant.now(), home, if (drawn.regionId == MapFrames.DWD) 5L else 15L)
+                val clip = keylessRadar(home.first, home.second)
+                if (clip != null) {
+                    keylessMap = { lat: Double, lon: Double -> clip.point(lat, lon) } to Snapshot.keylessName(clip.source)
+                    if (draw) MapFrames.of(clip) else null
+                } else {
+                    val grid = runCatching { OpenMeteoMap.fetch(home.first, home.second) }.onFailure { Log.w("Repo", "Open-Meteo map: $it") }.getOrNull()
+                        ?: OpenMeteoNowcast.fetchGrid(home.first, home.second, secrets.get(SOURCE_OPEN_METEO))
+                    keylessMap = { lat: Double, lon: Double -> grid.point(lat, lon) } to Snapshot.SOURCE_OPEN_METEO
+                    if (draw) MapFrames.of(grid) else null
+                }
+            } ?: return true
+            keylessFetched = Triple(Instant.now(), home, when (drawn.regionId) { MapFrames.DWD -> 5L; RmiInca.SOURCE -> 10L; else -> 15L })
             framesFor = null; frameFlow.value = drawn
             withContext(Dispatchers.IO) { runCatching { MapFrames.write(ctx.filesDir, drawn) } }
+            return true
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
             // ponytail: a failed map keeps the last one; the Now screen already shows the network problem
+            return false
         }
     }
 
@@ -230,7 +272,8 @@ class Repo(private val ctx: Context) {
         val nowcast = current.point; val issued = current.issued
         if (nowcast != null && issued != null && current.modelOnly) withContext(Dispatchers.IO) {
             val now = Instant.now()
-            runCatching { Snapshot.ofPoint(nowcast, issued, OutlookBars.join(current.outlook, nowcast, issued, now), full, now).write(ctx.filesDir) }
+            runCatching { Snapshot.ofPoint(nowcast, issued, OutlookBars.join(current.outlook, nowcast, issued, now), full, now,
+                current.regionName ?: Snapshot.SOURCE_OPEN_METEO).write(ctx.filesDir) }
         }
         runCatching { Widgets.updateAll(ctx) }
     }
@@ -244,7 +287,7 @@ class Repo(private val ctx: Context) {
         follow()
         val settings = prefs.value
         if (openMeteo) {
-            refreshOpenMeteo(settings)
+            refreshKeyless(settings, draw = false)
             val current = flow.value
             return@withLock if (current.problem == null && current.modelOnly) current.point?.let { nowcast -> current.issued?.let { nowcast to it } } else null
         }
@@ -330,7 +373,7 @@ class Repo(private val ctx: Context) {
      */
     suspend fun pointAt(lat: Double, lon: Double): Pair<PointForecast, Instant>? {
         if (openMeteo && !hasKey) return try {
-            withContext(Dispatchers.IO) { OpenMeteoNowcast.fetch(lat, lon, secrets.get(SOURCE_OPEN_METEO)) }
+            withContext(Dispatchers.IO) { keylessPoint(lat, lon).let { (point, issued) -> point to issued } }
         } catch (e: CancellationException) { throw e } catch (e: Exception) { null }
         val current = flow.value.forecast
         if (current == null || !current.region.contains(lat, lon)) scope.async { refresh(at = lat to lon) }.await()

@@ -152,7 +152,7 @@ private fun ConfigScreen(options: WidgetOptions, widget: RainWidgetBase, onChang
 
 private fun blurb(type: WidgetType) = when (type) {
     WidgetType.SUMMARY -> "The sentence, the chance and the next hour in six steps"
-    WidgetType.MINUTES -> "Rain rate from 30 min ago to an hour ahead, with its range"
+    WidgetType.MINUTES -> "Rain rate from 30 min ago to 90 min ahead, with its range"
     WidgetType.HOURS -> "Half-hour bars for two days; 12 h when small"
     WidgetType.RADAR -> "The latest radar around home, or the forecast"
     WidgetType.COMBINED -> "Sentence, the next-hour graph and 12 h of bars; for 4×4"

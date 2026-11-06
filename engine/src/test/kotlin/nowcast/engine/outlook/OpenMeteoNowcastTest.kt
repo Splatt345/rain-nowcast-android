@@ -5,18 +5,18 @@ import org.junit.Test
 import java.time.Instant
 
 class OpenMeteoNowcastTest {
-    // 11:00 .. 13:15 every 15 min, values for the quarter hour ENDING at each time
-    private val times = (0..9).map { "\"2026-10-28T%02d:%02d\"".format(11 + it * 15 / 60, it * 15 % 60) }
+    // 11:00 .. 13:45 every 15 min, values for the quarter hour ENDING at each time
+    private val times = (0..11).map { "\"2026-10-28T%02d:%02d\"".format(11 + it * 15 / 60, it * 15 % 60) }
     private fun json(a: List<Double?>, b: List<Double?>) = """{"minutely_15":{"time":[${times.joinToString(",")}],
         "precipitation_icon_d2":[${a.joinToString(",")}],"precipitation_gfs_global":[${b.joinToString(",")}]}}"""
 
     @Test fun quarterHoursBecomeMinutesOfAnEnsemble() {
         val now = Instant.parse("2026-10-28T12:07:00Z")
-        val h = OpenMeteo.parse(json(listOf(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.5, 1.0, 0.0, 0.0),
-                                     listOf(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)), "minutely_15")
+        val h = OpenMeteo.parse(json(listOf(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.5, 1.0, 0.0, 0.0, 0.0, 0.0),
+                                     listOf(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)), "minutely_15")
         val (p, issued) = OpenMeteoNowcast.point(h, now)
         assertEquals(Instant.parse("2026-10-28T12:00:00Z"), issued)
-        assertEquals(-60, p.minutes.first()); assertEquals(60, p.minutes.last())
+        assertEquals(-30, p.minutes.first()); assertEquals(105, p.minutes.last())
         fun at(m: Int) = p.minutes.indexOf(m)
         // 12:00 belongs to the slot ending 12:00; 12:01 to the one ending 12:15 (0 mm), 12:16..12:30 to 0.5 mm -> 2 mm/h
         assertEquals(0.0, p.values[at(1)], 1e-12)
@@ -29,7 +29,7 @@ class OpenMeteoNowcastTest {
     }
 
     @Test fun membersWithGapsAreDropped() {
-        val h = OpenMeteo.parse(json(List(10) { 0.0 }, List(10) { if (it == 3) null else 0.2 }), "minutely_15")
+        val h = OpenMeteo.parse(json(List(12) { 0.0 }, List(12) { if (it == 3) null else 0.2 }), "minutely_15")
         val (p, _) = OpenMeteoNowcast.point(h, Instant.parse("2026-10-28T12:07:00Z"))
         assertEquals(0.0, p.rainChance, 0.0)                         // only the complete, dry member is left
     }
@@ -40,6 +40,7 @@ class OpenMeteoNowcastTest {
         val paid = OpenMeteoNowcast.url(50.85, 4.35, "k")
         assertTrue(paid.startsWith("https://customer-api.open-meteo.com/")); assertTrue(paid.endsWith("&apikey=k"))
     }
+
     @Test fun aGridBecomesFieldsAroundNow() {
         val n = OpenMeteoNowcast.GRID * OpenMeteoNowcast.GRID
         // 10:00 .. 14:00 every 15 min; point 0 (north-west corner) has 0.5 mm in the quarter ending 12:15, the rest is dry

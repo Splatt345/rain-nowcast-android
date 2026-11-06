@@ -33,10 +33,10 @@ import java.util.Locale
 import kotlin.math.ceil
 import kotlin.math.roundToInt
 
-private const val SPAN = 60   // minutes either side of now
+private const val SPAN = SHOWN_PAST_MIN + SHOWN_AHEAD_MIN   // minutes shown
 
 /**
- * −60…+60 min around now: P10–P90 band, min/max, mean line, now marker and a probability strip.
+ * −30…+90 min around now: P10–P90 band, min/max, mean line, now marker and a probability strip.
  * Drag or tap to read a minute.
  */
 @Composable
@@ -44,7 +44,7 @@ fun NowcastGraph(point: PointForecast, issued: Instant, now: Instant, modifier: 
     val age = Duration.between(issued, now).toMinutes().toInt().coerceAtLeast(0)
     // index range of minutes visible, in "minutes from now"
     val fromNow = remember(point, age) { IntArray(point.minutes.size) { point.minutes[it] - age } }
-    val visible = remember(fromNow) { fromNow.indices.filter { fromNow[it] in -SPAN..SPAN } }
+    val visible = remember(fromNow) { fromNow.indices.filter { fromNow[it] in -SHOWN_PAST_MIN..SHOWN_AHEAD_MIN } }
     val yMax = remember(point, visible) {
         val top = visible.maxOfOrNull { maxOf(point.p90[it], point.values[it]) } ?: 0.0
         niceCeil(maxOf(1.0, top * 1.15))
@@ -61,11 +61,11 @@ fun NowcastGraph(point: PointForecast, issued: Instant, now: Instant, modifier: 
     Column(modifier) {
         Canvas(
             Modifier.fillMaxWidth().height(220.dp)
-                .semantics { contentDescription = "Rain rate graph from an hour ago to an hour ahead. ${point.summary}" }
+                .semantics { contentDescription = "Rain rate graph from half an hour ago to an hour and a half ahead. ${point.summary}" }
                 .pointerInput(fromNow) {
                     fun pick(x: Float) {
                         val left = 36.dp.toPx(); val plotWidth = size.width - left - 8.dp.toPx()
-                        val minute = (((x - left) / plotWidth) * 2 * SPAN - SPAN).roundToInt().coerceIn(-SPAN, SPAN)
+                        val minute = (((x - left) / plotWidth) * SPAN - SHOWN_PAST_MIN).roundToInt().coerceIn(-SHOWN_PAST_MIN, SHOWN_AHEAD_MIN)
                         val index = fromNow.indexOfFirst { it == minute }.takeIf { it >= 0 }
                         if (index != null && index != selected) { selected = index; haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove) }
                     }
@@ -88,7 +88,7 @@ fun NowcastGraph(point: PointForecast, issued: Instant, now: Instant, modifier: 
             val top = 28.dp.toPx(); val stripHeight = 10.dp.toPx()
             val axisHeight = 18.dp.toPx()
             val plotBottom = size.height - axisHeight - stripHeight - 8.dp.toPx()
-            fun x(minute: Int) = left + (minute + SPAN) / (2f * SPAN) * (right - left)
+            fun x(minute: Int) = left + (minute + SHOWN_PAST_MIN) / SPAN.toFloat() * (right - left)
             fun y(value: Double) = plotBottom - (value / yMax).toFloat().coerceIn(0f, 1.04f) * (plotBottom - top)
 
             val ticks = listOf(0.0, yMax / 2, yMax)
@@ -98,7 +98,7 @@ fun NowcastGraph(point: PointForecast, issued: Instant, now: Instant, modifier: 
                 text(measurer, formatRate(tick), axisStyle, Offset(4.dp.toPx(), y(tick) - 7.dp.toPx()))
             }
             text(measurer, "mm/h", axisStyle, Offset(4.dp.toPx(), 0f))
-            for (minute in listOf(-60, -30, 0, 30, 60)) {
+            for (minute in listOf(-30, 0, 30, 60, 90)) {
                 val caption = if (minute == 0) "now" else if (minute > 0) "+$minute" else "$minute"
                 val labelWidth = measurer.measure(caption, axisStyle).size.width
                 text(measurer, caption, axisStyle, Offset((x(minute) - labelWidth / 2f).coerceIn(left - 4f, right - labelWidth), size.height - axisHeight + 2.dp.toPx()))
@@ -123,7 +123,7 @@ fun NowcastGraph(point: PointForecast, issued: Instant, now: Instant, modifier: 
                 line(future, fromNow, { point.values[it] }, ::x, ::y, colors.primary, 3.dp.toPx())
 
                 val stripY = plotBottom + 6.dp.toPx()
-                val cellWidth = (right - left) / (2f * SPAN) + 0.5f
+                val cellWidth = (right - left) / SPAN.toFloat() + 0.5f
                 for (i in visible) if (fromNow[i] >= 0)
                     drawRect(colors.primary.copy(alpha = point.probability[i].toFloat().coerceIn(0f, 1f)), Offset(x(fromNow[i]), stripY), Size(cellWidth, stripHeight))
                 drawRoundRect(colors.outlineVariant, Offset(x(0), stripY), Size(right - x(0), stripHeight), CornerRadius(3.dp.toPx()), style = Stroke(1f))

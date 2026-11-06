@@ -17,6 +17,9 @@ import kotlin.math.*
  * Poland, Czechia, Switzerland and Austria. A ~400 km box around the place, clipped at the composite's edge.
  */
 object BrightSky {
+    const val SOURCE = "dwd"
+    /** Around the composite (west, south, east, north), a little generous: its corners decide, by a 404, inside this. */
+    private val BOUNDS = listOf(1.0, 45.5, 19.0, 56.2)
     /** 0.01 mm per 5 minutes, as mm/h. */
     private const val TO_MM_H = 0.01 * 12
 
@@ -28,13 +31,8 @@ object BrightSky {
 
     /** null when the place is outside the composite. */
     fun fetch(lat: Double, lon: Double, now: Instant = Instant.now()): RadarClip? {
-        val connection = URI(url(lat, lon, now)).toURL().openConnection() as HttpURLConnection
-        connection.connectTimeout = 20_000; connection.readTimeout = 30_000
-        connection.setRequestProperty("User-Agent", "rain-nowcast-android")
-        connection.setRequestProperty("Accept-Encoding", "gzip")     // the plain format is refused without it
-        val code = connection.responseCode
-        val stream = (if (code in 200..299) connection.inputStream else connection.errorStream) ?: throw IOException("Bright Sky HTTP $code")
-        val body = (if (connection.contentEncoding == "gzip") GZIPInputStream(stream) else stream).bufferedReader().use { it.readText() }
+        if (!covers(BOUNDS, lat, lon)) return null
+        val (code, body) = get(url(lat, lon, now))         // gzip: the plain format is refused without it
         if (code in 400..499 && "outside" in body) return null      // 404 "lat/lon lies outside the radar data range"
         if (code !in 200..299) throw IOException("Bright Sky HTTP $code")
         return parse(body)
@@ -62,7 +60,11 @@ object BrightSky {
         val byLon = corners.sortedBy { it.second }; val byLat = corners.sortedBy { it.first }
         // the lat/lon rectangle inside the clip: the map shows no dry margin where there is no radar
         val bbox = listOf(byLon[1].second, byLat[1].first, byLon[2].second, byLat[2].first)
-        return RadarClip(rows, cols, projected.minOf { it.first }, projected.maxOf { it.second }, bbox, times, fields, times[newest], newest)
+        val west = projected.minOf { it.first }; val north = projected.maxOf { it.second }
+        return RadarClip(SOURCE, rows, cols, bbox, times, fields, times[newest], newest) { lat, lon ->
+            val (x, y) = project(lat, lon)
+            north - y - 0.5 to x - west - 0.5
+        }
     }
 
     /** DWD's RADOLAN grid: polar stereographic on WGS84, true at 60° N, centred on 10° E, in km. */
@@ -77,14 +79,22 @@ object BrightSky {
 }
 
 /**
- * Rain rates (mm/h) on a clip of DWD's 1 km grid, row 0 north; [west] and [north] (km, [BrightSky.project]) are its
- * outer pixel edges. [bbox] (west, south, east, north) is the lat/lon rectangle inside it. [issued] is frame [newest].
+ * Rain rates (mm/h) on a clip of a keyless source's grid ([source]: [BrightSky.SOURCE], [RmiInca.SOURCE], ...).
+ * [bbox] (west, south, east, north) is the lat/lon rectangle inside it; [cell] gives a place's (row, col) in
+ * [fields], pixel centres on whole numbers. [issued] is frame [newest], the last observed or analysed one.
  */
-class RadarClip(val rows: Int, val cols: Int, val west: Double, val north: Double, val bbox: List<Double>,
-                val times: List<Instant>, val fields: List<FloatArray>, val issued: Instant, val newest: Int) {
-    /** Grid (row, col) of a place, pixel centres on whole numbers. */
-    fun cell(lat: Double, lon: Double): Pair<Double, Double> {
-        val (x, y) = BrightSky.project(lat, lon)
-        return north - y - 0.5 to x - west - 0.5
-    }
+class RadarClip(val source: String, val rows: Int, val cols: Int, val bbox: List<Double>, val times: List<Instant>,
+                val fields: List<FloatArray>, val issued: Instant, val newest: Int, val cell: (Double, Double) -> Pair<Double, Double>)
+
+/** GET as text, gzip accepted; the status and the body, an error's too. */
+internal fun get(url: String, userAgent: String = "rain-nowcast-android"): Pair<Int, String> = getBytes(url, userAgent).let { (code, bytes) -> code to bytes.decodeToString() }
+
+internal fun getBytes(url: String, userAgent: String = "rain-nowcast-android"): Pair<Int, ByteArray> {
+    val connection = URI(url).toURL().openConnection() as HttpURLConnection
+    connection.connectTimeout = 20_000; connection.readTimeout = 30_000
+    connection.setRequestProperty("User-Agent", userAgent)
+    connection.setRequestProperty("Accept-Encoding", "gzip")
+    val code = connection.responseCode
+    val stream = (if (code in 200..299) connection.inputStream else connection.errorStream) ?: return code to ByteArray(0)
+    return code to (if (connection.contentEncoding == "gzip") GZIPInputStream(stream) else stream).use { it.readBytes() }
 }

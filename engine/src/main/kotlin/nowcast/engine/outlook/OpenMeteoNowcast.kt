@@ -2,12 +2,12 @@ package nowcast.engine.outlook
 
 import kotlinx.serialization.json.*
 import nowcast.engine.forecast.*
+import nowcast.engine.radar.boxAround
 import java.time.Duration
 import java.time.Instant
 import java.time.LocalDateTime
 import java.time.ZoneOffset
 import java.util.Locale
-import kotlin.math.cos
 
 /**
  * The no-radar nowcast: Open-Meteo's 15-minute precipitation from every model that covers the place,
@@ -17,12 +17,14 @@ import kotlin.math.cos
  */
 object OpenMeteoNowcast {
     /** Five or more of these answer anywhere (checked 2026-10-28: Brussels 11, New York 6, Tokyo 6, Nairobi 5). */
-    val MODELS = listOf("icon_d2", "meteofrance_arome_france_hd", "knmi_harmonie_arome_europe", "dmi_harmonie_arome_europe",
-        "ukmo_uk_deterministic_2km", "ncep_hrrr_conus", "jma_msm", "icon_eu", "ecmwf_ifs025", "gfs_global", "icon_global",
-        "gem_seamless", "ukmo_global_deterministic_10km")
+    // native 15-minute runs where they exist (ICON-D2 RUC, AROME HD 15min); ICON on its native grids, as the plain
+    // dwd_icon_* ids will be from 2026-11-30
+    val MODELS = listOf("dwd_icon_d2_ruc_native", "meteofrance_arome_france_hd_15min", "knmi_harmonie_arome_europe", "dmi_harmonie_arome_europe",
+        "ukmo_uk_deterministic_2km", "meteoswiss_icon_ch1", "ncep_hrrr_conus", "jma_msm", "dwd_icon_eu_native", "ecmwf_ifs025", "gfs_global",
+        "dwd_icon_global_native", "gem_seamless", "ukmo_global_deterministic_10km")
     const val SLOT_MIN = 15
-    const val PAST_MIN = 60
-    const val AHEAD_MIN = 60
+    const val PAST_MIN = SHOWN_PAST_MIN
+    const val AHEAD_MIN = SHOWN_AHEAD_MIN + SLOT_MIN   // the issue time is up to a slot before now
 
     /** Open-Meteo takes the key only as a query parameter, so it travels in the URL (HTTPS); it is never logged here. */
     fun url(lat: Double, lon: Double, apiKey: String?): String =
@@ -49,7 +51,7 @@ object OpenMeteoNowcast {
             return hourly.time.indexOfFirst { !it.isBefore(time) && Duration.between(time, it).toMinutes() < SLOT_MIN }.takeIf { it >= 0 }
         }
         val slots = minutes.map(::slot)
-        if (slots.any { it == null }) throw OutlookException("Open-Meteo's 15-minute series does not cover the hour around now")
+        if (slots.any { it == null }) throw OutlookException("Open-Meteo's 15-minute series does not cover the time around now")
         val curves = members.map { series -> DoubleArray(minutes.size) { series[slots[it]!!] * 60.0 / SLOT_MIN } }
         fun at(index: Int) = DoubleArray(curves.size) { curves[it][index] }
         val mean = DoubleArray(minutes.size) { at(it).average() }
@@ -60,6 +62,7 @@ object OpenMeteoNowcast {
         return PointForecast(minutes, mean, probability, quantile(0.0), quantile(10.0), quantile(25.0), quantile(75.0), quantile(90.0), quantile(100.0),
             probability.copyOfRange(zero, probability.size).max(), summary(minutes, mean, probability, age), true) to issued
     }
+
     /**
      * The no-radar map: [GRID]×[GRID] points over a box [GRID_HALF_DEG]° of latitude each way from home, all
      * in one request (Open-Meteo's multi-location form), best-match model only. Each point counts against the
@@ -78,10 +81,7 @@ object OpenMeteoNowcast {
             "&timezone=GMT" + (apiKey?.let { "&apikey=$it" } ?: "")
     }
 
-    fun gridBbox(lat: Double, lon: Double): List<Double> {
-        val halfLon = GRID_HALF_DEG / cos(Math.toRadians(lat)).coerceAtLeast(0.2)
-        return listOf(lon - halfLon, lat - GRID_HALF_DEG, lon + halfLon, lat + GRID_HALF_DEG)
-    }
+    fun gridBbox(lat: Double, lon: Double): List<Double> = boxAround(lat, lon, GRID_HALF_DEG)
 
     fun fetchGrid(lat: Double, lon: Double, apiKey: String?, now: Instant = Instant.now()): RainGrid {
         val bbox = gridBbox(lat, lon)

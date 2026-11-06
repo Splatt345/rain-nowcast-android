@@ -6,8 +6,8 @@ import nowcast.engine.render.*
 enum class NowView { NOWCAST, OUTLOOK }
 enum class AppColors(val label: String) { WALLPAPER("Wallpaper"), RAIN("Rain"), CUSTOM("Custom") }
 enum class DarkMode(val label: String) { SYSTEM("System"), LIGHT("Light"), DARK("Dark") }
-/** Where the next hour comes from: OPERA radar (MeteoGate key) or Open-Meteo's models (free, no key, worldwide). */
-enum class NowcastSource(val label: String) { RADAR("Radar"), OPEN_METEO("Open-Meteo") }
+/** Where the next hour comes from: OPERA radar (MeteoGate key), or without a key the best free source for home (national radar, else Open-Meteo). */
+enum class NowcastSource(val label: String) { RADAR("Radar"), OPEN_METEO("No key (auto)") }
 
 data class Settings(
     val homeLat: Double? = null, val homeLon: Double? = null,

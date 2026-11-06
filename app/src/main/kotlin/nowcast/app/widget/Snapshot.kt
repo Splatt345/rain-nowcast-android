@@ -6,6 +6,9 @@ import nowcast.app.data.*
 import nowcast.app.ui.now.*
 import nowcast.engine.forecast.*
 import nowcast.engine.outlook.*
+import nowcast.engine.radar.BrightSky
+import nowcast.engine.radar.GeoSphereNowcast
+import nowcast.engine.radar.RmiInca
 import nowcast.engine.render.*
 import java.io.File
 import java.time.Duration
@@ -35,8 +38,10 @@ data class Snapshot(
     val probability: List<Float>,
     val bars: List<SBar> = emptyList(),
     val radar: SRadar? = null,
-    /** What the age counts from: "radar", or "Open-Meteo" when the nowcast is model output. */
+    /** What the age counts from: "radar", or the name of the keyless source. */
     val source: String = "radar",
+    /** The rate that counts as rain in these values (see PointForecast.wet). */
+    val wet: Float = RAIN_THRESHOLD.toFloat(),
 ) {
     fun age(now: Instant): Int = Duration.between(Instant.ofEpochSecond(issued), now).toMinutes().toInt().coerceAtLeast(0)
 
@@ -44,7 +49,7 @@ data class Snapshot(
     fun summary(now: Instant): String =
         if (minutes.isEmpty()) "No forecast yet · open the app"
         else nowcast.engine.forecast.summary(minutes.toIntArray(), DoubleArray(mean.size) { mean[it].toDouble() },
-            DoubleArray(probability.size) { probability[it].toDouble() }, age(now))
+            DoubleArray(probability.size) { probability[it].toDouble() }, age(now), wet.toDouble())
 
     /** Highest chance from now to the end of the series; null once the series is all in the past. */
     fun chance(now: Instant): Int? {
@@ -64,7 +69,7 @@ data class Snapshot(
     }
 
     companion object {
-        const val VERSION = 1
+        const val VERSION = 2      // 2: radar amounts gauge-corrected
         const val FILE = "widget.json"
         /** Radar crop around home: half side in km and pixels (OPERA is ~1 km/px, so 128 px is native). */
         const val HALF_KM = 64.0
@@ -102,26 +107,28 @@ data class Snapshot(
                 minutes = point.minutes.toList(), mean = rounded(point.values), p10 = rounded(point.p10), p90 = rounded(point.p90), probability = rounded(point.probability),
                 bars = bars.filterNotNull().map { SBar(it.start.epochSecond, it.mm.toFloat(), it.p10.toFloat(), it.p90.toFloat(),
                     it.probability.toFloat(), it.source == BarSource.NOWCAST) },
-                radar = SRadar(bbox, sampler.width, sampler.height, lat, lon, frames),
+                radar = SRadar(bbox, sampler.width, sampler.height, lat, lon, frames), wet = point.wet.toFloat(),
             )
         }
 
-        /** Open-Meteo's point nowcast: no radar crop, so the radar widget says why it is empty. */
-        fun ofPoint(point: PointForecast, issued: Instant, bars: List<Bar?>, full: Boolean, now: Instant = Instant.now()): Snapshot {
+        /** A keyless point nowcast from [source]: no radar crop, so the radar widget says why it is empty. */
+        fun ofPoint(point: PointForecast, issued: Instant, bars: List<Bar?>, full: Boolean, now: Instant = Instant.now(), source: String = SOURCE_OPEN_METEO): Snapshot {
             fun rounded(values: DoubleArray) = values.map { (it * 100).roundToInt() / 100f }
-            return Snapshot(issued = issued.epochSecond, written = now.epochSecond, region = "Open-Meteo", full = full,
+            return Snapshot(issued = issued.epochSecond, written = now.epochSecond, region = source, full = full,
                 minutes = point.minutes.toList(), mean = rounded(point.values), p10 = rounded(point.p10), p90 = rounded(point.p90), probability = rounded(point.probability),
                 bars = bars.filterNotNull().map { SBar(it.start.epochSecond, it.mm.toFloat(), it.p10.toFloat(), it.p90.toFloat(),
                     it.probability.toFloat(), it.source == BarSource.NOWCAST) },
-                source = SOURCE_OPEN_METEO)
+                source = source)
         }
 
         const val SOURCE_OPEN_METEO = "Open-Meteo"
+        /** The Now screen's name for a keyless map source. */
+        fun keylessName(source: String) = when (source) { BrightSky.SOURCE -> "DWD"; RmiInca.SOURCE -> "RMI"; GeoSphereNowcast.SOURCE -> "GeoSphere"; else -> SOURCE_OPEN_METEO }
 
         /** Made-up but plausible data for the picker preview and the configuration screen before a first run. */
         fun sample(now: Instant = Instant.now()): Snapshot {
             val issued = now.epochSecond - now.epochSecond % 300 - 300
-            val minutes = (-55..60).toList()
+            val minutes = (-SHOWN_PAST_MIN..SHOWN_AHEAD_MIN).toList()
             val mean = minutes.map { minute -> (2.4 * exp(-((minute - 30.0) / 14).let { it * it })).toFloat() }
             val bars = (0 until 96).map { i ->
                 val start = now.epochSecond - now.epochSecond % 1800 + 1800L * i

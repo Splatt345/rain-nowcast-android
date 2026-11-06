@@ -3,6 +3,8 @@ package nowcast.app.data
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import nowcast.engine.forecast.*
+import nowcast.engine.math.Grid
+import nowcast.engine.math.toDb
 import nowcast.engine.outlook.*
 import nowcast.engine.radar.*
 import nowcast.engine.render.*
@@ -31,7 +33,7 @@ data class Saved(
         modelOnly = modelOnly, regionName = regionName, updated = updated?.let(Instant::ofEpochSecond))
 
     companion object {
-        const val VERSION = 1
+        const val VERSION = 2      // 2: radar amounts gauge-corrected
         private const val FILE = "last.json"
         private val json = Json { ignoreUnknownKeys = true }
 
@@ -56,15 +58,15 @@ data class Saved(
 data class SPoint(
     val minutes: List<Int>, val values: List<Double>, val probability: List<Double>, val pmin: List<Double>,
     val p10: List<Double>, val p25: List<Double>, val p75: List<Double>, val p90: List<Double>, val pmax: List<Double>,
-    val rainChance: Double, val summary: String, val inCoverage: Boolean,
+    val rainChance: Double, val summary: String, val inCoverage: Boolean, val wet: Double = RAIN_THRESHOLD,
 ) {
     fun engine() = PointForecast(minutes.toIntArray(), values.toDoubleArray(), probability.toDoubleArray(), pmin.toDoubleArray(),
         p10.toDoubleArray(), p25.toDoubleArray(), p75.toDoubleArray(), p90.toDoubleArray(), pmax.toDoubleArray(),
-        rainChance, summary, inCoverage)
+        rainChance, summary, inCoverage, wet)
 
     companion object {
         fun of(forecast: PointForecast) = SPoint(forecast.minutes.toList(), forecast.values.toList(), forecast.probability.toList(), forecast.pmin.toList(),
-            forecast.p10.toList(), forecast.p25.toList(), forecast.p75.toList(), forecast.p90.toList(), forecast.pmax.toList(), forecast.rainChance, forecast.summary, forecast.inCoverage)
+            forecast.p10.toList(), forecast.p25.toList(), forecast.p75.toList(), forecast.p90.toList(), forecast.pmax.toList(), forecast.rainChance, forecast.summary, forecast.inCoverage, forecast.wet)
     }
 }
 
@@ -94,6 +96,9 @@ class MapFrames(val levels: List<ByteArray>, val width: Int, val height: Int, va
     val minutes: Int get() = minuteOf(times.size - 1)
     fun minuteOf(frame: Int) = Duration.between(times[0], times[frame]).toMinutes().toInt()
     fun time(minute: Int): Instant = times[0].plusSeconds(60L * minute)
+    /** A keyless map: a box around home, not a radar region. */
+    val keyless: Boolean get() = regionId in KEYLESS
+    fun covers(lat: Double, lon: Double) = covers(bbox, lat, lon)
 
     /** The frame at or before [minute] and how far on towards the next one, 0 until 1. */
     fun locate(minute: Int): Pair<Int, Double> {
@@ -117,31 +122,41 @@ class MapFrames(val levels: List<ByteArray>, val width: Int, val height: Int, va
         /** Every radar frame and every forecast step, drawn once for the map. A few seconds for a region. */
         fun of(forecast: Forecast): MapFrames {
             val sampler = Render.mercatorSampler(forecast.geo, forecast.region.bbox, width = 512)
-            val fields = forecast.past.map { frame -> FloatArray(frame.rain.values.size) { frame.rain.values[it].toFloat() } } + forecast.mean.toList()
-            val times = forecast.past.map { it.time } + (1..forecast.mean.size).map { forecast.issued.plusSeconds(60L * forecast.intervalMinutes * it) }
+            val past = forecast.past.filter { Duration.between(it.time, forecast.issued).toMinutes() <= SHOWN_PAST_MIN }
+            val fields = past.map { frame -> FloatArray(frame.rain.values.size) { frame.rain.values[it].toFloat() } } + forecast.mean.toList()
+            val times = past.map { it.time } + (1..forecast.mean.size).map { forecast.issued.plusSeconds(60L * forecast.intervalMinutes * it) }
             return MapFrames(fields.map { Render.levels(it, forecast.geo.rows, forecast.geo.cols, sampler) }, sampler.width, sampler.height, times, forecast.region.bbox,
-                forecast.region.id, forecast.issued, forecast.past.size - 1, Render.rasterMotion(forecast.motion, sampler))
+                forecast.region.id, forecast.issued, past.size - 1, Render.rasterMotion(forecast.motion, sampler))
         }
 
-        /** Open-Meteo's model on a coarse grid around home, for the map without a radar key. */
+        /** Open-Meteo's model on a grid around home, for the map without a radar key. */
         fun of(grid: RainGrid): MapFrames = still(OPEN_METEO, grid.fields, grid.rows, grid.cols, grid.times, grid.bbox, grid.issued,
             grid.times.indexOfLast { it <= grid.issued }.coerceAtLeast(0), Render.gridSampler(grid.bbox, grid.rows, grid.cols, width = 512))
 
-        /** DWD's radar and nowcast around home, for the map without a radar key. */
-        fun of(clip: RadarClip): MapFrames = still(DWD, clip.fields, clip.rows, clip.cols, clip.times, clip.bbox, clip.issued, clip.newest,
-            Render.sampler(clip.bbox, 512, clip::cell))
+        /** A keyless source's radar or nowcast around home (DWD, RMI, GeoSphere), for the map without a radar key. */
+        fun of(clip: RadarClip): MapFrames = still(clip.source, clip.fields, clip.rows, clip.cols, clip.times, clip.bbox, clip.issued, clip.newest,
+            Render.sampler(clip.bbox, 512, clip.cell))
 
-        /** Frames without a motion field: cross-faded between steps rather than moved. */
+        /**
+         * Frames that came without a motion field: the optical flow of the three around [newest] moves rain between
+         * steps, so a shower travels rather than fading in. Fewer than three frames, or dry: cross-faded.
+         * These rates are true mm/h, a level is the radar's own rate (see [Render.lut]).
+         */
         private fun still(id: String, fields: List<FloatArray>, rows: Int, cols: Int, times: List<Instant>, bbox: List<Double>, issued: Instant,
                           newest: Int, sampler: Render.Sampler): MapFrames {
             val nodeCols = (sampler.width - 1) / 8 + 2; val nodeRows = (sampler.height - 1) / 8 + 2
-            return MapFrames(fields.map { Render.levels(it, rows, cols, sampler) }, sampler.width, sampler.height, times, bbox, id, issued, newest,
-                Render.RasterMotion(nodeCols, nodeRows, 8, FloatArray(nodeCols * nodeRows), FloatArray(nodeCols * nodeRows)))
+            val around = if (fields.size < 3) emptyList() else (newest + 1).coerceIn(2, fields.size - 1).let { fields.subList(it - 2, it + 1) }
+            val flow = if (around.none { f -> f.any { it > 0f } }) Render.RasterMotion(nodeCols, nodeRows, 8, FloatArray(nodeCols * nodeRows), FloatArray(nodeCols * nodeRows))
+            // ponytail: one field for every step, from the three around now; per-step flow if long hourly loops drift
+            else Render.rasterMotion(motion(around.map { f -> Grid(rows, cols, DoubleArray(f.size) { toDb(f[it].toDouble()) }) }), sampler)
+            val levels = fields.map { f -> Render.levels(FloatArray(f.size) { f[it] / GAUGE_FACTOR.toFloat() }, rows, cols, sampler) }
+            return MapFrames(levels, sampler.width, sampler.height, times, bbox, id, issued, newest, flow)
         }
 
-        /** [regionId]s of the keyless maps: no radar region. */
         const val OPEN_METEO = "open-meteo"
-        const val DWD = "dwd"
+        const val DWD = BrightSky.SOURCE
+        /** [regionId]s of the keyless maps. */
+        private val KEYLESS = setOf(OPEN_METEO, DWD, RmiInca.SOURCE, GeoSphereNowcast.SOURCE)
 
         private const val FILE = "map.bin"
         private const val VERSION = 2

@@ -5,11 +5,23 @@ import kotlin.math.floor
 
 const val RAIN_THRESHOLD = 0.1
 
+/**
+ * The OPERA radar reads 3.7x the rain RMI's gauges measure: 2 years of hourly totals at 14 Belgian gauges,
+ * test days left out (local_weather_model: python -m nowcast.cirrustest --gauge-factor). Radar amounts are
+ * shown times this. What counts as rain is scaled with them ([RADAR_WET]), so whether it rains is still
+ * the radar's call and no rain goes missing. Twin of ha-rain-nowcast's render.GAUGE_FACTOR.
+ */
+const val GAUGE_FACTOR = 0.27
+/** [RAIN_THRESHOLD] in gauge-corrected radar amounts. */
+const val RADAR_WET = RAIN_THRESHOLD * GAUGE_FACTOR
+
 class PointForecast(
     val minutes: IntArray, val values: DoubleArray, val probability: DoubleArray,
     val pmin: DoubleArray, val p10: DoubleArray, val p25: DoubleArray,
     val p75: DoubleArray, val p90: DoubleArray, val pmax: DoubleArray,
     val rainChance: Double, val summary: String, val inCoverage: Boolean,
+    /** The rate that counts as rain in these values: [RADAR_WET] for the radar, [RAIN_THRESHOLD] otherwise. */
+    val wet: Double = RAIN_THRESHOLD,
 )
 
 /** Twin of ha-rain-nowcast's rain-nowcast/nowcast/interpolate.py:point_series. motion is px per frame step. */
@@ -62,21 +74,22 @@ fun percentile(values: DoubleArray, percent: Double): Double {
 }
 
 /** Twin of server.Nowcaster._summary - wording must not drift. */
-fun summary(minutes: IntArray, series: DoubleArray, probability: DoubleArray, age: Int): String {
+fun summary(minutes: IntArray, series: DoubleArray, probability: DoubleArray, age: Int, wet: Double = RAIN_THRESHOLD): String {
     val now = minutes.indexOfFirst { it >= age }
     if (now < 0) return "No current forecast: the newest radar is $age min old"
     val future = series.copyOfRange(now, series.size)
     val ahead = IntArray(minutes.size - now) { minutes[now + it] - age }
     // rint: Python's round() is half-to-even
     val chance = Math.rint(100 * probability.copyOfRange(now, probability.size).max()).toInt()
-    if (future[0] >= RAIN_THRESHOLD) {
-        val dry = future.indexOfFirst { it < RAIN_THRESHOLD }
+    fun rate(value: Double) = if (value < 0.05) "<0.1" else "%.1f".format(value)
+    if (future[0] >= wet) {
+        val dry = future.indexOfFirst { it < wet }
         val stops = if (dry >= 0) ", stopping in ${ahead[dry]} min" else ""
-        return "Raining now, ${"%.1f".format(future[0])} mm/h$stops"
+        return "Raining now, ${rate(future[0])} mm/h$stops"
     }
-    val wet = future.indexOfFirst { it >= RAIN_THRESHOLD }
-    if (wet >= 0) return "Rain starting in ${ahead[wet]} min ($chance% chance), " +
-        "up to ${"%.1f".format(future.copyOfRange(wet, future.size).max())} mm/h"
+    val first = future.indexOfFirst { it >= wet }
+    if (first >= 0) return "Rain starting in ${ahead[first]} min ($chance% chance), " +
+        "up to ${rate(future.copyOfRange(first, future.size).max())} mm/h"
     if (chance >= 20) return "Probably dry, but a $chance% chance of rain in the next ${ahead.last()} min"
     return "Dry for the next ${ahead.last()} minutes"
 }

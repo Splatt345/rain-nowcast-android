@@ -6,6 +6,12 @@ import java.time.Duration
 import java.time.Instant
 import kotlin.math.roundToInt
 
+/** What every graph and the map show: this many minutes before now to [SHOWN_AHEAD_MIN] after. */
+const val SHOWN_PAST_MIN = 30
+const val SHOWN_AHEAD_MIN = 90
+/** 5-min steps forecast: [SHOWN_AHEAD_MIN] plus 10 for the radar frame's age (it is 5-10 min old). The model gives the first 12. */
+const val LEADS = (SHOWN_AHEAD_MIN + 10) / 5
+
 class Forecast(
     val region: Region, val geo: GridGeo, val past: List<Frame>,
     val members: Members, val mean: Array<FloatArray>, val motion: Motion,
@@ -23,11 +29,15 @@ class Forecast(
         val inCoverage = rawRow in 0 until rows && rawCol in 0 until cols
         val row = rawRow.coerceIn(0, rows - 1); val col = rawCol.coerceIn(0, cols - 1)
         val first = -intervalMinutes * (past.size - 1); val last = intervalMinutes * mean.size
-        val minutes = IntArray(last - first + 1) { first + it }
+        // all the frames feed the curves' motion, but only the last SHOWN_PAST_MIN of them are shown
+        val shownFirst = maxOf(first, -SHOWN_PAST_MIN); val skip = shownFirst - first
+        val minutes = IntArray(last - shownFirst + 1) { shownFirst + it }
         val pastCount = past.size
         // past frames as the float32 they are in the members' frame list, without copying them
         fun curve(future: (Int, Int) -> Float) = pointSeries(pastCount + mean.size, rows, cols, motion, row, col, intervalMinutes, 1) { frame, cell ->
             if (frame < pastCount) past[frame].rain.values[cell].toFloat().toDouble() else future(frame - pastCount, cell).toDouble() }
+            .let { it.copyOfRange(skip, it.size) }
+        // the chance is counted on the radar's own rates; the amounts are then gauge-corrected
         val series = curve { lead, cell -> mean[lead][cell] }
         val curves = (0 until members.count).map { member -> curve { lead, cell -> members.at(member, lead, cell) } }
         val probability = DoubleArray(minutes.size) { index -> curves.count { it[index] >= RAIN_THRESHOLD }.toDouble() / curves.size }
@@ -37,12 +47,14 @@ class Forecast(
         }
         val age = maxOf(0L, Duration.between(past.last().time, now).toMinutes()).toInt()
         val zero = minutes.indexOfFirst { it >= 0 }
+        fun gauged(values: DoubleArray) = DoubleArray(values.size) { values[it] * GAUGE_FACTOR }
+        val values = gauged(series)
         return PointForecast(
-            minutes, series, probability,
-            DoubleArray(minutes.size) { index -> minOf(curves.minOf { it[index] }, series[index]) },
-            band(10.0, true), band(25.0, true), band(75.0, false), band(90.0, false),
-            DoubleArray(minutes.size) { index -> maxOf(curves.maxOf { it[index] }, series[index]) },
-            probability.copyOfRange(zero, probability.size).max(), summary(minutes, series, probability, age), inCoverage)
+            minutes, values, probability,
+            gauged(DoubleArray(minutes.size) { index -> minOf(curves.minOf { it[index] }, series[index]) }),
+            gauged(band(10.0, true)), gauged(band(25.0, true)), gauged(band(75.0, false)), gauged(band(90.0, false)),
+            gauged(DoubleArray(minutes.size) { index -> maxOf(curves.maxOf { it[index] }, series[index]) }),
+            probability.copyOfRange(zero, probability.size).max(), summary(minutes, values, probability, age, RADAR_WET), inCoverage, RADAR_WET)
     }
 }
 
@@ -61,7 +73,7 @@ class Nowcaster(private val model: SmaatModel?, private val nMembers: Int = 10, 
         val train = frames.map { it.rain }
         val geo = frames.last().geo
         // STEPS' velocity perturbations and incremental mask are in km and minutes
-        val result = ensemble(train, 12, nMembers, seed, kmPerPixel = geo.pixelWidth / 1000.0,
+        val result = ensemble(train, LEADS, nMembers, seed, kmPerPixel = geo.pixelWidth / 1000.0,
             timestep = medianGapMinutes(frames).toDouble(), dir = dir)
         val timings = LinkedHashMap(result.timings)
         var members = result.members; var used = false; var error: String? = null
@@ -80,7 +92,7 @@ class Nowcaster(private val model: SmaatModel?, private val nMembers: Int = 10, 
         }
         val start = System.nanoTime()
         val cells = result.rows * result.cols
-        val mean = Array(12) { lead -> FloatArray(cells) { cell ->
+        val mean = Array(LEADS) { lead -> FloatArray(cells) { cell ->
             var sum = 0.0; var count = 0
             for (member in 0 until members.count) { val value = members.at(member, lead, cell); if (!value.isNaN()) { sum += value; count++ } }
             if (count > 0) (sum / count).toFloat() else Float.NaN

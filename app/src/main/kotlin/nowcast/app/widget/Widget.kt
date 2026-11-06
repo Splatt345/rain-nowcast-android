@@ -259,7 +259,7 @@ private fun Chart(layers: List<Layer>, desc: String, modifier: GlanceModifier) {
 private fun MinuteChart(view: WidgetView, heightDp: Float, axes: Boolean) {
     val height = heightDp.coerceAtLeast(16f)
     Chart(WidgetCharts.minutes(view.snapshot, view.now, view.innerWidth, height, view.density, view.options.units, axes, view.textScale),
-        "Rain rate from 30 minutes ago to an hour ahead. ${view.sentence}", GlanceModifier.fillMaxWidth().height(height.dp))
+        "Rain rate from 30 minutes ago to an hour and a half ahead. ${view.sentence}", GlanceModifier.fillMaxWidth().height(height.dp))
 }
 
 @Composable
@@ -371,7 +371,7 @@ private fun Radar(view: WidgetView, sizeClass: SizeClass) {
     val radar = view.snapshot.radar
     val frame = radar?.frame(view.options.lead)
     if (radar == null || frame == null) {
-        Empty(if (view.snapshot.source == Snapshot.SOURCE_OPEN_METEO) "No radar map in Open-Meteo mode" else "No radar yet · open the app", sizeClass, view.textScale)
+        Empty(if (view.snapshot.source != "radar") "No radar map in the widget without a key" else "No radar yet · open the app", sizeClass, view.textScale)
         return
     }
     val time = TIME_FORMAT.format(Instant.ofEpochSecond(view.snapshot.issued + 60L * frame.lead).atZone(ZoneId.systemDefault()))

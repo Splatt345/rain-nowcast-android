@@ -9,11 +9,11 @@ object Alerts {
     fun minutesToRain(forecast: PointForecast, issued: Instant, now: Instant, leadMin: Int, threshold: Double): Int? {
         val age = Duration.between(issued, now).toMinutes().toInt()
         val at = forecast.minutes.indexOfFirst { it >= age }
-        if (at < 0 || forecast.values[at] >= RAIN_THRESHOLD) return null
+        if (at < 0 || forecast.values[at] >= forecast.wet) return null
         for (i in at until forecast.minutes.size) {
             val ahead = forecast.minutes[i] - age
             if (ahead > leadMin) return null
-            if (forecast.values[i] >= RAIN_THRESHOLD && forecast.probability[i] >= threshold) return ahead
+            if (forecast.values[i] >= forecast.wet && forecast.probability[i] >= threshold) return ahead
         }
         return null
     }

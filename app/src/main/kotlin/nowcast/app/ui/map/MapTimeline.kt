@@ -59,6 +59,9 @@ fun MapTimeline(frames: MapFrames, minute: Int, onMinute: (Int) -> Unit, point: 
         }
     }
     val yMax = remember(homeCurve) { niceCeil(maxOf(1.0, (homeCurve.maxOfOrNull { (_, i) -> maxOf(point!!.p90[i], point.values[i]) } ?: 0.0) * 1.15)) }
+    // (map minute, clock time) on the half hours
+    val halfHours = remember(frames) { (0..frames.minutes).mapNotNull { mapMinute ->
+        frames.time(mapMinute).atZone(zone).takeIf { it.minute % 30 == 0 }?.let { mapMinute to TIME_FORMAT.format(it) } } }
     val nowMin = Duration.between(frames.times[0], now).toMinutes().toInt()
     val issuedMin = Duration.between(frames.times[0], frames.issued).toMinutes().toInt()
 
@@ -97,7 +100,9 @@ fun MapTimeline(frames: MapFrames, minute: Int, onMinute: (Int) -> Unit, point: 
 
         drawRoundRect(colors.onSurface.copy(alpha = 0.05f), Offset(left, top), Size(split - left, bottom - top), CornerRadius(6.dp.toPx()))
         drawRoundRect(colors.primary.copy(alpha = 0.10f), Offset(split, top), Size(right - split, bottom - top), CornerRadius(6.dp.toPx()))
-        drawText(measurer, if (frames.regionId == MapFrames.OPEN_METEO) "MODEL" else "RADAR", Offset(left + 6.dp.toPx(), top + 3.dp.toPx()), labelStyle)
+        // a nowcast that starts at its analysis (RMI, GeoSphere) has no past to label
+        val past = measurer.measure(if (frames.regionId == MapFrames.OPEN_METEO) "MODEL" else "RADAR", labelStyle)
+        if (split - left > past.size.width + 12.dp.toPx()) drawText(past, topLeft = Offset(left + 6.dp.toPx(), top + 3.dp.toPx()))
         drawText(measurer, "FORECAST", Offset(split + 6.dp.toPx(), top + 3.dp.toPx()), labelStyle.copy(color = colors.primary))
 
         if (homeCurve.isNotEmpty()) {
@@ -120,10 +125,8 @@ fun MapTimeline(frames: MapFrames, minute: Int, onMinute: (Int) -> Unit, point: 
         // axis: a tick per radar frame, clock times on the half hour
         drawLine(colors.outlineVariant, Offset(left, bottom), Offset(right, bottom), 1.dp.toPx())
         for (mapMinute in frameMinutes) drawLine(colors.onSurfaceVariant.copy(alpha = 0.6f), Offset(x(mapMinute), bottom), Offset(x(mapMinute), bottom + 4.dp.toPx()), 1.dp.toPx())
-        for (mapMinute in 0..frames.minutes) {
-            val time = frames.time(mapMinute).atZone(zone)
-            if (time.minute % 30 != 0) continue
-            val caption = TIME_FORMAT.format(time); val textWidth = measurer.measure(caption, labelStyle).size.width
+        for ((mapMinute, caption) in halfHours) {
+            val textWidth = measurer.measure(caption, labelStyle).size.width
             drawText(measurer, caption, Offset((x(mapMinute) - textWidth / 2f).coerceIn(0f, size.width - textWidth), bottom + 6.dp.toPx()), labelStyle)
         }
 

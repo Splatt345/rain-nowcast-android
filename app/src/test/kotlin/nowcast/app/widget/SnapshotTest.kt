@@ -25,8 +25,8 @@ class SnapshotTest {
 
     @Test fun openMeteoSnapshotHasNoRadarAndSaysWhereItIsFrom() {
         val now = Instant.parse("2026-10-28T12:07:00Z")
-        val t = (0..9).map { "\"2026-10-28T%02d:%02d\"".format(11 + it * 15 / 60, it * 15 % 60) }.joinToString(",")
-        val h = OpenMeteo.parse("""{"minutely_15":{"time":[$t],"precipitation_icon_d2":[0,0,0,0,0,0,0.5,1,0,0]}}""", "minutely_15")
+        val t = (0..11).map { "\"2026-10-28T%02d:%02d\"".format(11 + it * 15 / 60, it * 15 % 60) }.joinToString(",")
+        val h = OpenMeteo.parse("""{"minutely_15":{"time":[$t],"precipitation_icon_d2":[0,0,0,0,0,0,0.5,1,0,0,0,0]}}""", "minutely_15")
         val (p, issued) = OpenMeteoNowcast.point(h, now)
         val s = Snapshot.decode(Snapshot.encode(Snapshot.ofPoint(p, issued, emptyList(), full = true, now = now)))!!
         assertNull(s.radar); assertEquals(Snapshot.SOURCE_OPEN_METEO, s.source)

@@ -15,7 +15,7 @@ Every five minutes the app takes the last hour of EUMETNET OPERA radar, estimate
 - Rain map: the last hour of radar and the next hour of forecast, minute by minute; tap any place for its forecast
 - Rain alerts and five home-screen widgets
 - Ready-made regions: Belgium, the Netherlands, Luxembourg, North Rhine-Westphalia, Nord de France; add your own anywhere OPERA covers, with an in-app guide to training a model for it
-- No radar key, or outside Europe? Open-Meteo's models instead, worldwide, no key
+- No radar key? The best free source for home, picked for you: national radar nowcasts for Belgium and Luxembourg (RMI), Austria (GeoSphere) and Germany and around (DWD), MET Norway's in the Nordics, Open-Meteo's models anywhere else
 
 ### Widgets
 
@@ -71,7 +71,7 @@ Tests mirror the same folders.
 
 ## Data
 
-Radar © EUMETNET OPERA via MeteoGate (CC BY 4.0) · Forecasts by [Open-Meteo.com](https://open-meteo.com) (CC BY 4.0) · Map © OpenFreeMap, OpenMapTiles, OpenStreetMap contributors.
+Radar © EUMETNET OPERA via MeteoGate (CC BY 4.0) · Forecasts by [Open-Meteo.com](https://open-meteo.com) (CC BY 4.0) · Keyless radar: DWD via [Bright Sky](https://brightsky.dev), RMI, GeoSphere Austria (CC BY 4.0), MET Norway (CC BY 4.0) · Map © OpenFreeMap, OpenMapTiles, OpenStreetMap contributors.
 
 ## License
 

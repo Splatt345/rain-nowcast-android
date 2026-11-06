@@ -65,7 +65,8 @@ object Render {
     fun lut(name: String): IntArray = lut(PALETTES[name] ?: PALETTES.getValue(DEFAULT_PALETTE))
 
     fun lut(stops: List<Pair<Double, Int>>): IntArray {
-        val xs = DoubleArray(stops.size) { log10(stops[it].first) }
+        // a level is the radar's own rate; its colour is the colour of that rate gauge-corrected
+        val xs = DoubleArray(stops.size) { log10(stops[it].first / GAUGE_FACTOR) }
         fun channel(shift: Int) = DoubleArray(stops.size) { (stops[it].second shr shift and 255).toDouble() }
         val red = channel(16); val green = channel(8); val blue = channel(0)
         return IntArray(256) { level ->
@@ -233,8 +234,10 @@ object Render {
         return out
     }
 
-    fun levels(field: FloatArray, rows: Int, cols: Int, sampler: Sampler): ByteArray =
-        ByteArray(sampler.rows.size).also { out -> resampleInto(field, rows, cols, sampler, SMOOTH_PX) { index, value -> out[index] = level(value).toByte() } }
+    fun levels(field: FloatArray, rows: Int, cols: Int, sampler: Sampler): ByteArray = ByteArray(sampler.rows.size).also { out ->
+        if (field.none { it > 0f }) out.fill(DRY_LEVEL.toByte())           // most frames, most days
+        else resampleInto(field, rows, cols, sampler, SMOOTH_PX) { index, value -> out[index] = level(value).toByte() }
+    }
 
     private val alpha = alphaLut()
 

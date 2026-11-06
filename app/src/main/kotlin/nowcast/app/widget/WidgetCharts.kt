@@ -8,6 +8,8 @@ import android.graphics.Paint
 import android.graphics.Path
 import android.graphics.RectF
 import nowcast.app.ui.now.*
+import nowcast.engine.forecast.SHOWN_AHEAD_MIN
+import nowcast.engine.forecast.SHOWN_PAST_MIN
 import nowcast.engine.outlook.*
 import nowcast.engine.render.*
 import java.time.Instant
@@ -59,20 +61,20 @@ object WidgetCharts {
     fun niceCeil(value: Double): Double =
         doubleArrayOf(1.0, 2.0, 4.0, 5.0, 10.0, 20.0, 40.0, 50.0, 100.0, 200.0).firstOrNull { it >= value } ?: ceil(value)
 
-    /** −30…+60 min around now: P10–P90 band, expected line (past quieter), now marker; axes when there is room. */
+    /** −30…+90 min around now: P10–P90 band, expected line (past quieter), now marker; axes when there is room. */
     fun minutes(snapshot: Snapshot, now: Instant, widthDp: Float, heightDp: Float, density: Float, units: RainUnits, axes: Boolean,
                 textScale: Float = 1f): List<Layer> {
         val masks = Masks(widthDp, heightDp, density)
         val labelSize = LABEL_DP * textScale
         val age = snapshot.age(now)
-        val visible = snapshot.minutes.indices.filter { snapshot.minutes[it] - age in -30..60 }
+        val visible = snapshot.minutes.indices.filter { snapshot.minutes[it] - age in -SHOWN_PAST_MIN..SHOWN_AHEAD_MIN }
         val top = visible.maxOfOrNull { maxOf(snapshot.p90[it], snapshot.mean[it]).toDouble() } ?: 0.0
         val yMax = niceCeil(maxOf(1.0, top * 1.15))
         val left = if (axes) masks.dp((if (units == RainUnits.WORDS) 46f else 26f) * labelSize / 10f) else masks.dp(2f)
         val right = masks.width - masks.dp(4f)
         val plotTop = if (axes) masks.dp(labelSize + 3f) else masks.dp(3f)
         val bottom = masks.height - if (axes) masks.dp(labelSize + 5f) else masks.dp(2f)
-        fun x(min: Int) = left + (min + 30) / 90f * (right - left)
+        fun x(min: Int) = left + (min + SHOWN_PAST_MIN).toFloat() / (SHOWN_PAST_MIN + SHOWN_AHEAD_MIN) * (right - left)
         fun y(value: Double) = bottom - (value / yMax).toFloat().coerceIn(0f, 1.04f) * (bottom - plotTop)
 
         val muted = masks[Ink.MUTED]
@@ -88,7 +90,7 @@ object WidgetCharts {
                 muted.drawLine(left, y(value), right, y(value), grid)
                 muted.drawText(text, masks.dp(1f), y(value) - masks.dp(2.5f), label)     // above its line, never across it
             }
-            for (min in listOf(-30, 0, 30, 60)) {
+            for (min in listOf(-30, 0, 30, 60, 90)) {
                 val text = if (min == 0) "now" else if (min > 0) "+$min" else "$min"
                 val textWidth = label.measureText(text)
                 muted.drawText(text, (x(min) - textWidth / 2).coerceIn(left, right - textWidth), masks.height - masks.dp(3f), label)

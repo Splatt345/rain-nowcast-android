@@ -24,10 +24,11 @@ class RenderTest {
         fun rgb(t: IntArray, i: Int) = listOf(t[i] shr 16 and 255, t[i] shr 8 and 255, t[i] and 255)
         val bg = Render.lut("blue-green")
         assertEquals(listOf(150, 200, 255), rgb(bg, 0))
-        assertEquals(listOf(99, 171, 251), rgb(bg, 64)); assertEquals(listOf(248, 169, 49), rgb(bg, 200))
-        assertEquals(listOf(200, 50, 180), rgb(bg, 255))
-        assertEquals(listOf(47, 106, 141), rgb(Render.lut("viridis"), 128))
-        assertEquals(listOf(242, 109, 30), rgb(Render.lut("classic"), 200))
+        // gauge-corrected colours: the top level (80 mm/h on the radar) is ~22 mm/h measured
+        assertEquals(listOf(150, 200, 255), rgb(bg, 64)); assertEquals(listOf(53, 202, 106), rgb(bg, 200))
+        assertEquals(listOf(248, 140, 46), rgb(bg, 255))
+        assertEquals(listOf(69, 49, 125), rgb(Render.lut("viridis"), 128))
+        assertEquals(listOf(199, 236, 43), rgb(Render.lut("classic"), 200))
     }
 
     @Test fun mercatorRowsAreNotUniformAndNorthFirst() {

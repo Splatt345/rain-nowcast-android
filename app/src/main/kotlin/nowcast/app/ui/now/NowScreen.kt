@@ -26,6 +26,7 @@ import androidx.compose.ui.unit.dp
 import nowcast.app.data.*
 import nowcast.app.ui.*
 import nowcast.engine.forecast.*
+import nowcast.app.widget.Snapshot
 import nowcast.engine.outlook.*
 import java.time.Duration
 import java.time.Instant
@@ -51,7 +52,7 @@ fun NowScreen(state: UiState, now: Instant, view: NowView, onView: (NowView) -> 
             val point = state.point
             val issued = state.issued
             val age = issued?.let { Duration.between(it, now).toMinutes().toInt() }
-            val source = if (state.modelOnly) "Open-Meteo" else "radar"
+            val source = if (state.modelOnly) state.regionName ?: Snapshot.SOURCE_OPEN_METEO else "radar"
             Header(state.forecast?.region?.name.takeIf { !state.modelOnly } ?: state.regionName, age, state.loading, source)
 
             when {
@@ -74,8 +75,8 @@ fun NowScreen(state: UiState, now: Instant, view: NowView, onView: (NowView) -> 
                         "${problemText(state.problem)} — showing ${from.replaceFirstChar { it.lowercase() }}", warn = true)
                     else if (stale) Banner(Icons.Outlined.Schedule,
                         "${source.replaceFirstChar { it.uppercase() }} is $age min old; the next refresh will catch up", warn = true)
-                    if (state.modelOnly) Banner(Icons.Outlined.Info,
-                        "Open-Meteo forecast models, not radar: rain that is already falling may be missed or misplaced", warn = false)
+                    if (state.modelOnly && source == Snapshot.SOURCE_OPEN_METEO) Banner(Icons.Outlined.Info,
+                        "Open-Meteo's forecast model, not radar: rain that is already falling may be missed or misplaced", warn = false)
                     if (!point.inCoverage) Banner(Icons.Outlined.WrongLocation, "Home is outside the radar crop; showing its nearest edge", warn = true)
                 }
             }
@@ -130,14 +131,15 @@ private fun Header(region: String?, age: Int?, loading: Boolean, source: String)
 
 @Composable
 private fun Stats(point: PointForecast, age: Int) {
-    val start = point.minutes.indexOfFirst { it >= age }.let { if (it < 0) point.minutes.lastIndex else it }    // past the series: its end, not the radar an hour back
+    val start = point.minutes.indexOfFirst { it >= age }.let { if (it < 0) point.minutes.lastIndex else it }    // past the series: its end, not the radar before it
     val rate = point.values[start]
     Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-        // counted from now, like the summary sentence (rainChance starts at the radar frame)
-        val chance = point.probability.copyOfRange(start, point.probability.size).max()
+        // the hour from now, like the summary sentence (rainChance starts at the radar frame); the series runs on past it
+        val end = point.minutes.indexOfFirst { it > age + 60 }.let { if (it <= start) point.minutes.size else it }
+        val chance = point.probability.copyOfRange(start, end).max()
         Tile("Chance", "${(100 * chance).roundToInt()}", "%", "next hour", Modifier.weight(1.2f), highlight = true)
-        Tile("Now", if (rate > 0.0 && rate < RAIN_THRESHOLD) "<0.1" else formatRate(rate), "mm/h", if (rate >= RAIN_THRESHOLD) "raining" else "dry", Modifier.weight(1f))
-        Tile("Peak", formatRate(point.values.copyOfRange(start, point.values.size).max()), "mm/h", "in the hour", Modifier.weight(1f))
+        Tile("Now", if (rate > 0.0 && rate < 0.05) "<0.1" else formatRate(rate), "mm/h", if (rate >= point.wet) "raining" else "dry", Modifier.weight(1f))
+        Tile("Peak", formatRate(point.values.copyOfRange(start, end).max()), "mm/h", "in the hour", Modifier.weight(1f))
     }
 }
 
@@ -205,7 +207,11 @@ private fun OutlookCard(state: UiState, now: Instant, zone: ZoneId) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
             val outlook = state.outlook
-            val first = if (state.modelOnly) "First hour from Open-Meteo's 15-minute models" else "First hour from radar"
+            val first = when {
+                !state.modelOnly -> "First hour from radar"
+                state.regionName == Snapshot.SOURCE_OPEN_METEO -> "First hour from Open-Meteo's model, as on the map"
+                else -> "First two hours from ${state.regionName}'s radar nowcast"
+            }
             val source = when {
                 outlook == null -> ""
                 outlook.usedModel -> "$first, then the local model on " +

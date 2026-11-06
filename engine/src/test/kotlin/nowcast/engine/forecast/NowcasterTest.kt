@@ -26,11 +26,11 @@ class NowcasterTest {
         val fc = Nowcaster(model = null, nMembers = 4).run(be, frames())
         assertFalse(fc.modelUsed)
         assertEquals(5, fc.intervalMinutes)
-        assertEquals(4, fc.members.size); assertEquals(12, fc.members[0].size)
+        assertEquals(4, fc.members.size); assertEquals(LEADS, fc.members[0].size)
         val (lat, lon) = 50.0 to 4.0
         val p = fc.point(lat, lon, now = Instant.parse("2026-10-27T12:58:00Z"))
         assertEquals(p.minutes.size, p.values.size)
-        assertEquals(-55, p.minutes.first()); assertEquals(60, p.minutes.last())
+        assertEquals(-30, p.minutes.first()); assertEquals(5 * LEADS, p.minutes.last())
         assertTrue(p.probability.all { it in 0.0..1.0 })
         assertTrue(p.p10.indices.all { p.p10[it] <= p.values[it] + 1e-9 && p.values[it] <= p.p90[it] + 1e-9 })
         assertTrue(p.summary.isNotBlank())
@@ -67,7 +67,7 @@ class NowcasterTest {
         println("POINTBOX synthetic: max |dvalue| %.3f mm/h, max |dprob| %.2f, chance %.2f vs %.2f".format(dv, dp, full.rainChance, box.rainChance))
         assertTrue(full.rainChance > 0.5 && box.rainChance > 0.5)
         // a 64 km box tapers the blob at its edge: same arrival, peak within 30%, not the same curve
-        fun arrival(p: PointForecast) = p.minutes.indices.first { p.minutes[it] > 0 && p.values[it] >= 1.0 }
+        fun arrival(p: PointForecast) = p.minutes.indices.first { p.minutes[it] > 0 && p.values[it] >= 1.0 * GAUGE_FACTOR }   // 1 mm/h on the radar
         assertTrue(kotlin.math.abs(full.minutes[arrival(full)] - box.minutes[arrival(box)]) <= 5)
         assertEquals(full.values.max(), box.values.max(), 0.3 * full.values.max())
     }

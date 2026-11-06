@@ -13,7 +13,7 @@ WHAT YOU GET
 • Light and dark themes, wallpaper colours, several radar colour scales
 
 RADAR, OR NO KEY AT ALL
-The radar comes from MeteoGate's Open Radar Data API, which needs a free personal key (meteogate.eu). Without a key, or outside Europe, the app uses Open-Meteo's forecast models instead: it works anywhere in the world, with no key.
+The radar comes from MeteoGate's Open Radar Data API, which needs a free personal key (meteogate.eu). Without a key the app picks the best free source for your home: national radar nowcasts for Belgium and Luxembourg (RMI), Austria (GeoSphere) and Germany and around (DWD), MET Norway's in the Nordics, and Open-Meteo's forecast models anywhere else in the world.
 
 COVERAGE
 Ready-made regions: Belgium, the Netherlands, Luxembourg, North Rhine-Westphalia and Nord de France. Add your own region anywhere OPERA covers Europe; an in-app guide shows how to train a neural network for it.
@@ -21,4 +21,4 @@ Ready-made regions: Belgium, the Netherlands, Luxembourg, North Rhine-Westphalia
 PRIVATE BY DESIGN
 No account, no ads, no tracking, no analytics. The forecast is computed on the device. Your location is used only to fetch the weather for where you are and is never stored by us.
 
-Data: radar © EUMETNET OPERA via MeteoGate (CC BY 4.0); forecasts by Open-Meteo.com (CC BY 4.0); map © OpenFreeMap, OpenMapTiles, OpenStreetMap contributors.
+Data: radar © EUMETNET OPERA via MeteoGate (CC BY 4.0); forecasts by Open-Meteo.com (CC BY 4.0); keyless radar: DWD via Bright Sky, RMI, GeoSphere Austria (CC BY 4.0), MET Norway (CC BY 4.0); map © OpenFreeMap, OpenMapTiles, OpenStreetMap contributors.

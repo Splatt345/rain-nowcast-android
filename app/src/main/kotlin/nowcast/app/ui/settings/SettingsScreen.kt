@@ -122,8 +122,9 @@ private fun Main(repo: Repo, openRegions: () -> Unit, openGuide: () -> Unit, mod
                 update { it.copy(nowcastSource = source) }; repo.kick(force = true) }
             Text(if (settings.nowcastSource == NowcastSource.RADAR)
                     "Observed radar (EUMETNET OPERA, Europe), moved forward by the nowcast. Needs a free MeteoGate key."
-                else "Open-Meteo's forecast models every 15 min, as a small ensemble: anywhere in the world, no key, " +
-                    "free for non-commercial use. Model output, not observed rain: less sharp in the first hour than radar.",
+                else "The best free source for home, no key: a national radar nowcast where there is one (RMI in Belgium " +
+                    "and Luxembourg, GeoSphere in Austria, DWD in Germany and around; MET Norway for the Nordic next hour), " +
+                    "elsewhere Open-Meteo's forecast models every 15 min, anywhere in the world. Free for non-commercial use.",
                 Modifier.padding(start = 56.dp, end = 16.dp, bottom = 8.dp),
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             Item(Icons.Outlined.Key, "MeteoGate ORD key",
@@ -235,6 +236,7 @@ private fun Main(repo: Repo, openRegions: () -> Unit, openGuide: () -> Unit, mod
                 0.1f..0.9f, 7, settings.notify) { threshold -> update { it.copy(notifyThreshold = (threshold * 10).roundToInt() / 10.0) } }
         }
         Text("Radar: EUMETNET OPERA via MeteoGate · Outlook" + (if (settings.nowcastSource == NowcastSource.OPEN_METEO) " and nowcast" else "") +
+            (if (settings.nowcastSource == NowcastSource.OPEN_METEO) " · Keyless radar: DWD via Bright Sky, RMI, GeoSphere Austria (CC BY 4.0), MET Norway (CC BY 4.0)" else "") +
             ": Open-Meteo (weather data by Open-Meteo.com, CC BY 4.0) · Map: OpenFreeMap © OpenMapTiles, data © OpenStreetMap contributors",
             style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.padding(start = 4.dp, top = 20.dp))
